@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from livekit.agents import AgentServer, JobContext, JobProcess, cli
 
-from ...shared.logging import configure_logging, get_logger
+from ...shared.logging import configure_logging, get_logger, install_redaction
 from ...shared.settings import get_settings
 from ..services import Services
 
@@ -33,7 +33,12 @@ def _get_services() -> Services:
 
 def prewarm(proc: JobProcess) -> None:
     settings = get_settings()
-    configure_logging(level=settings.log_level, json_output=settings.log_json, service="vp-worker")
+    configure_logging(
+        level=settings.log_level,
+        json_output=settings.log_json,
+        service="vp-worker",
+        log_pii=settings.log_pii,
+    )
     from ...observability.tracing_setup import configure_tracing
 
     configure_tracing(
@@ -74,6 +79,9 @@ def build_server() -> AgentServer:
         drain_timeout=1800,
     )
 
+    # LiveKit's CLI installs its own log handler in the main process, which also re-emits every
+    # job-process record; redact there too (transcripts, phone numbers in room names).
+    server.on("worker_started", lambda: install_redaction(log_pii=settings.log_pii))
     # The entrypoint must be importable by qualified name: in production LiveKit runs each
     # job in a separate process (forkserver) and pickles the function reference.
     server.rtc_session(agent_name=settings.agent_dispatch_name)(entrypoint)

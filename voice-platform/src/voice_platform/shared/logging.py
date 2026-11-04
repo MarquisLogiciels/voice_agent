@@ -148,22 +148,60 @@ def current_log_context() -> Mapping[str, Any]:
 _STD_ATTRS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime", "taskName"}
 
 
+_E164 = re.compile(r"\+\d{8,15}")
+
+
+def _mask_phones(value: Any, _depth: int = 0) -> Any:
+    """Logs keep the last 4 digits of phone numbers (LiveKit SIP room names and participant
+    identities embed the caller's number, e.g. ``call-_+15145550199_x``)."""
+    if isinstance(value, str):
+        return _E164.sub(lambda m: mask_phone(m.group(0)) or "", value)
+    if _depth < 6 and isinstance(value, Mapping):
+        return {k: _mask_phones(v, _depth + 1) for k, v in value.items()}
+    if _depth < 6 and isinstance(value, list | tuple):
+        return [_mask_phones(v, _depth + 1) for v in value]
+    return value
+
+
+_PII_PREFIX = "lk.pii."
+"""LiveKit attaches caller speech, tool arguments, chat context and DTMF to log records under
+this prefix. They are dropped unless ``log_pii`` is explicitly enabled (local debugging)."""
+
+
 class RedactionFilter(logging.Filter):
+    def __init__(self, *, log_pii: bool = False) -> None:
+        super().__init__()
+        self.log_pii = log_pii
+
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             message = record.getMessage()
         except Exception:  # malformed %-format — keep the raw message
             message = str(record.msg)
-        record.msg = redact_text(message)
+        record.msg = _mask_phones(redact_text(message))
         record.args = None
         for key, value in list(record.__dict__.items()):
             if key in _STD_ATTRS:
                 continue
-            if key.lower() in _SENSITIVE_KEYS:
+            if key.startswith(_PII_PREFIX) and not self.log_pii:
+                record.__dict__[key] = REDACTED
+            elif key.lower() in _SENSITIVE_KEYS:
                 record.__dict__[key] = REDACTED
             else:
-                record.__dict__[key] = redact_value(value)
+                record.__dict__[key] = _mask_phones(redact_value(value))
         return True
+
+
+def install_redaction(*, log_pii: bool = False) -> int:
+    """Attach the redaction filter to every root handler that lacks one — including handlers
+    installed by LiveKit's CLI (main worker process) and its log-forwarding handler in job
+    processes, which bypass logger-level filters. Returns the number of handlers changed."""
+    n = 0
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, RedactionFilter) for f in handler.filters):
+            handler.addFilter(RedactionFilter(log_pii=log_pii))
+            n += 1
+    return n
 
 
 class JsonFormatter(logging.Formatter):
@@ -198,14 +236,16 @@ class _ContextTextFormatter(logging.Formatter):
         return base
 
 
-def configure_logging(*, level: str = "INFO", json_output: bool = True, service: str) -> None:
+def configure_logging(
+    *, level: str = "INFO", json_output: bool = True, service: str, log_pii: bool = False
+) -> None:
     root = logging.getLogger()
     for handler in list(root.handlers):
         if getattr(handler, "_vp_handler", False):
             root.removeHandler(handler)
     handler = logging.StreamHandler(sys.stdout)
     handler._vp_handler = True  # type: ignore[attr-defined]
-    handler.addFilter(RedactionFilter())
+    handler.addFilter(RedactionFilter(log_pii=log_pii))
     if json_output:
         handler.setFormatter(JsonFormatter(service))
     else:
@@ -214,6 +254,7 @@ def configure_logging(*, level: str = "INFO", json_output: bool = True, service:
         )
     root.addHandler(handler)
     root.setLevel(level.upper())
+    install_redaction(log_pii=log_pii)
     # third-party noise
     for noisy in ("httpx", "httpcore", "botocore", "urllib3", "asyncio"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

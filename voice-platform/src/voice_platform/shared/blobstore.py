@@ -32,6 +32,10 @@ class BlobStore(Protocol):
     async def put(self, key: str, data: bytes, content_type: str) -> None: ...
     async def get(self, key: str) -> bytes: ...
     async def delete(self, key: str) -> None: ...
+    async def purge(self, key: str) -> None:
+        """Irrecoverable delete (all versions) — for erasure and retention."""
+        ...
+
     async def signed_url(self, key: str, ttl_s: int = 300) -> str: ...
 
 
@@ -71,6 +75,9 @@ class LocalBlobStore:
         path = self._path(key)
         await asyncio.to_thread(lambda: path.unlink(missing_ok=True))
 
+    async def purge(self, key: str) -> None:
+        await self.delete(key)
+
     def sign(self, key: str, expires: int) -> str:
         return hmac.new(self._secret, f"{key}:{expires}".encode(), hashlib.sha256).hexdigest()
 
@@ -108,7 +115,8 @@ class S3BlobStore:
             Key=validate_key(key),
             Body=data,
             ContentType=content_type,
-            ServerSideEncryption="AES256",
+            # no per-object SSE header: the bucket default (KMS CMK in the Terraform stack)
+            # applies; forcing AES256 here silently bypassed the customer-managed key
         )
 
     async def get(self, key: str) -> bytes:
@@ -125,6 +133,27 @@ class S3BlobStore:
         await asyncio.to_thread(
             self._client.delete_object, Bucket=self._bucket, Key=validate_key(key)
         )
+
+    async def purge(self, key: str) -> None:
+        """Delete every version and delete marker of ``key``. On a versioned bucket a plain
+        delete only adds a marker and the recording stays recoverable until lifecycle expiry."""
+        k = validate_key(key)
+
+        def run() -> None:
+            pages = self._client.get_paginator("list_object_versions").paginate(
+                Bucket=self._bucket, Prefix=k
+            )
+            for page in pages:
+                items = [*page.get("Versions", []), *page.get("DeleteMarkers", [])]
+                objs: list[Any] = [
+                    {"Key": v["Key"], "VersionId": v["VersionId"]} for v in items if v["Key"] == k
+                ]
+                if objs:
+                    self._client.delete_objects(
+                        Bucket=self._bucket, Delete={"Objects": objs, "Quiet": True}
+                    )
+
+        await asyncio.to_thread(run)
 
     async def signed_url(self, key: str, ttl_s: int = 300) -> str:
         url: str = await asyncio.to_thread(

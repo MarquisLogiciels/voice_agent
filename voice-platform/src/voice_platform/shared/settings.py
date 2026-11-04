@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     service_name: str = "voice-platform"
     log_level: str = "INFO"
     log_json: bool = True
+    log_pii: bool = Field(
+        default=False,
+        description="Keep LiveKit's lk.pii.* log fields (transcripts, tool arguments). Local "
+        "debugging only; refused in staging/prod.",
+    )
 
     # --- database -------------------------------------------------------------------------
     database_url: SecretStr = SecretStr(
@@ -114,6 +119,8 @@ class Settings(BaseSettings):
                 problems.append("VP_ENCRYPTION_KEYS is required")
             if self.allow_insecure_http_integrations:
                 problems.append("VP_ALLOW_INSECURE_HTTP_INTEGRATIONS must be false")
+            if self.log_pii:
+                problems.append("VP_LOG_PII must be false (transcripts would reach the logs)")
             if self.blob_backend == "local" and self.environment is Environment.PROD:
                 problems.append("VP_BLOB_BACKEND must be s3 in prod")
             if problems:

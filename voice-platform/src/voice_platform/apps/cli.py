@@ -102,6 +102,22 @@ async def _eval(args: argparse.Namespace) -> int:
     return 0 if summary["pass_rate"] >= args.min_pass_rate else 1
 
 
+async def _reapply_erasures(args: argparse.Namespace) -> None:
+    from ..core.privacy import reapply_erasures
+    from ..shared.settings import get_settings
+    from .services import Services
+
+    settings = get_settings()
+    services = Services.from_settings(settings)
+    try:
+        totals = await reapply_erasures(
+            services.db, services.blobs, settings.encryption_keys.get_secret_value()
+        )
+    finally:
+        await services.db.dispose()
+    print(totals)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="vp")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -114,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("jobs", help="run the background job runner")
     sub.add_parser("rotate-keys", help="re-encrypt credentials with the primary key")
     sub.add_parser("gen-key", help="print a new encryption key")
+    sub.add_parser(
+        "reapply-erasures",
+        help="re-run recorded data-subject erasures (required after restoring a backup)",
+    )
     e = sub.add_parser("eval", help="run scenarios locally against a config file")
     e.add_argument("--config", required=True)
     e.add_argument("--scenarios", default="scenarios/receptionist")
@@ -144,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         print(generate_fernet_key())
     elif args.cmd == "eval":
         return asyncio.run(_eval(args))
+    elif args.cmd == "reapply-erasures":
+        asyncio.run(_reapply_erasures(args))
     return 0
 
 

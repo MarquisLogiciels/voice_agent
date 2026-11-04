@@ -55,7 +55,7 @@ async def sweep(db: Database, blobs: BlobStore, *, batch: int = 500) -> dict[str
                 rec_days = int((meta or {}).get("recording_retention_days") or days)
                 if started < now - timedelta(days=min(rec_days, days)):
                     try:
-                        await blobs.delete(uri)
+                        await blobs.purge(uri)
                     except Exception:
                         logger.warning(
                             "recording delete failed",

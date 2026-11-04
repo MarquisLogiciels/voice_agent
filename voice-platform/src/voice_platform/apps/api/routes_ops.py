@@ -770,29 +770,14 @@ async def export_subject(
 async def erase_subject(
     phone: str, ctx: TenantCtx = Depends(tenant_ctx(P.TENANT_UPDATE))
 ) -> dict[str, Any]:
-    """Erase a caller's conversations, transcripts, tool payloads and recordings."""
+    """Erase a caller's conversations, transcripts, tool payloads and recordings (all
+    versions). The audit entry stores a keyed hash so the erasure can be re-applied after a
+    backup restore (``vp reapply-erasures``)."""
+    from ...core.privacy import _hmac_keys, erase_subject_data, subject_ref
+
     e164 = normalize_e164(phone)
-    convs = (
-        await ctx.session.scalars(
-            sa.select(Conversation).where(
-                Conversation.tenant_id == ctx.tenant_id,
-                sa.or_(Conversation.caller_number == e164, Conversation.callee_number == e164),
-            )
-        )
-    ).all()
-    ids = [c.id for c in convs]
-    recordings = 0
-    for c in convs:
-        if c.recording_uri:
-            await ctx.services.blobs.delete(c.recording_uri)
-            recordings += 1
-    if ids:
-        await ctx.session.execute(
-            sa.update(ToolExecution)
-            .where(ToolExecution.conversation_id.in_(ids))
-            .values(request={}, response={})
-        )
-        await ctx.session.execute(sa.delete(Conversation).where(Conversation.id.in_(ids)))
+    res = await erase_subject_data(ctx.session, ctx.services.blobs, ctx.tenant_id, e164)
+    keys = _hmac_keys(ctx.services.settings.encryption_keys.get_secret_value())
     await record_audit(
         ctx.session,
         tenant_id=ctx.tenant_id,
@@ -800,8 +785,14 @@ async def erase_subject(
         action="data_subject.erase",
         resource_type="data_subject",
         resource_id=e164[-4:],
-        details={"conversations": len(ids), "recordings": recordings},
+        details={
+            "conversations": res.conversations,
+            "recordings": res.recordings,
+            "subject_ref": subject_ref(e164, keys[0]) if keys else None,
+        },
     )
+    ids = range(res.conversations)
+    recordings = res.recordings
     return {
         "conversations_deleted": len(ids),
         "recordings_deleted": recordings,

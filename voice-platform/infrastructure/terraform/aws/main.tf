@@ -300,7 +300,10 @@ resource "aws_iam_role_policy" "task_s3" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource = ["${aws_s3_bucket.data.arn}/tenants/*"] },
+      # DeleteObjectVersion + ListBucketVersions: erasure/retention purge every version of a
+      # recording (the bucket is versioned; a plain delete only adds a marker)
+      { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = ["${aws_s3_bucket.data.arn}/tenants/*"] },
+      { Effect = "Allow", Action = ["s3:ListBucketVersions"], Resource = [aws_s3_bucket.data.arn], Condition = { StringLike = { "s3:prefix" = ["tenants/*"] } } },
       { Effect = "Allow", Action = ["kms:GenerateDataKey", "kms:Decrypt"], Resource = [aws_kms_key.data.arn] },
     ]
   })
