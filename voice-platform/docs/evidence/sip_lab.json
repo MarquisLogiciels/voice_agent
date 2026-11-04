@@ -1,0 +1,428 @@
+{
+  "inbound": {
+    "invite_to_200ok_s": 0.97,
+    "greeting_heard": "hi thanks for calling maple dental how can i help you today",
+    "greeting_wer": 0.0,
+    "answer_heard": "we open at nine am on monday if there anything else i can assist you with",
+    "response_latency_s": 4.47,
+    "user_transcripts": [
+      "what time do you open on monday"
+    ],
+    "conversation": {
+      "status": "completed",
+      "direction": "inbound",
+      "channel": "phone",
+      "caller_number": "+15145550199",
+      "callee_number": "+15145558235",
+      "end_reason": "participant_disconnected",
+      "duration_s": 43.66
+    },
+    "sip": [
+      "out INVITE sip:+15145558235@127.0.0.1:5060 SIP/2.0",
+      "in SIP/2.0 100 Processing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 200 OK",
+      "out ACK sip:+15145558235@127.0.0.1:5060 SIP/2.0",
+      "out BYE sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 OK"
+    ]
+  },
+  "blind_transfer": {
+    "asked_at": 8018.283962265,
+    "refer_to": "tel:+15145550177",
+    "caller_heard_after_transfer": "hi this is found at the front desk how can i help",
+    "refers": [
+      "tel:+15145550177"
+    ],
+    "notifies": [
+      "SIP/2.0 100 Trying\r\n",
+      "SIP/2.0 200 OK\r\n"
+    ],
+    "original_leg_end": "remote_bye",
+    "transfer_outcomes": [
+      200
+    ],
+    "sip": [
+      "out INVITE sip:+15145551525@127.0.0.1:5060 SIP/2.0",
+      "in SIP/2.0 100 Processing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 200 OK",
+      "out ACK sip:+15145551525@127.0.0.1:5060 SIP/2.0",
+      "in REFER sip:+15145550199@127.0.0.1:5062 SIP/2.0",
+      "out SIP/2.0 202 Accepted",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "in BYE sip:+15145550199@127.0.0.1:5062 SIP/2.0",
+      "out SIP/2.0 200 OK"
+    ],
+    "conversation": {
+      "status": "transferred",
+      "end_reason": "participant_disconnected",
+      "transfer": {
+        "ok": true,
+        "mode": "blind",
+        "status": "completed",
+        "attempts": [
+          {
+            "mode": "blind",
+            "error": null,
+            "status": "completed",
+            "duration_s": 1.02,
+            "destination": "front_desk"
+          }
+        ],
+        "destination": "front_desk"
+      },
+      "duration_s": 34.77
+    },
+    "tool_events": [
+      {
+        "tool": "transfer_to_human",
+        "ok": true,
+        "error": null,
+        "args": {
+          "reason": "The caller asked to speak to a person.",
+          "summary": "Caller asked to speak to a person. Calling from +15145550199. Recent conversation: Agent: Hi, thanks for calling Maple Dental. How can I help you today? Caller: can i speak to a person please"
+        }
+      }
+    ],
+    "transfer_events": [
+      {
+        "ts": 1793770850.77567,
+        "mode": "blind",
+        "error": null,
+        "reason": "The caller asked to speak to a person.",
+        "status": "completed",
+        "duration_s": 1.02,
+        "destination": "front_desk"
+      }
+    ]
+  },
+  "busy_then_fallback": {
+    "asked_at": 8054.37937872,
+    "refer_to": "tel:+15145550177",
+    "caller_heard_after_transfer": "hi this is found at the front desk",
+    "refers": [
+      "tel:+15145550178",
+      "tel:+15145550177"
+    ],
+    "notifies": [
+      "SIP/2.0 100 Trying\r\n",
+      "SIP/2.0 486 Busy Here\r\n",
+      "SIP/2.0 100 Trying\r\n",
+      "SIP/2.0 200 OK\r\n"
+    ],
+    "original_leg_end": "remote_bye",
+    "transfer_outcomes": [
+      486,
+      200
+    ],
+    "sip": [
+      "out INVITE sip:+15145551431@127.0.0.1:5060 SIP/2.0",
+      "in SIP/2.0 100 Processing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 200 OK",
+      "out ACK sip:+15145551431@127.0.0.1:5060 SIP/2.0",
+      "in REFER sip:+15145550199@127.0.0.1:5062 SIP/2.0",
+      "out SIP/2.0 202 Accepted",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "in SIP/2.0 200 success",
+      "in REFER sip:+15145550199@127.0.0.1:5062 SIP/2.0",
+      "out SIP/2.0 202 Accepted",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "in BYE sip:+15145550199@127.0.0.1:5062 SIP/2.0",
+      "out SIP/2.0 200 OK"
+    ],
+    "conversation": {
+      "status": "transferred",
+      "end_reason": "participant_disconnected",
+      "transfer": {
+        "ok": true,
+        "mode": "blind",
+        "status": "completed",
+        "attempts": [
+          {
+            "mode": "blind",
+            "error": "SIP transfer failed: call transfer failed: sip status: 486: Busy Here",
+            "status": "busy",
+            "duration_s": 0.02,
+            "destination": "front_desk"
+          },
+          {
+            "mode": "blind",
+            "error": null,
+            "status": "completed",
+            "duration_s": 1.01,
+            "destination": "backup"
+          }
+        ],
+        "destination": "backup"
+      },
+      "duration_s": 34.7
+    },
+    "tool_events": [
+      {
+        "tool": "transfer_to_human",
+        "ok": true,
+        "error": null,
+        "args": {
+          "reason": "The caller asked to speak to a person.",
+          "summary": "Caller asked to speak to a person. Calling from +15145550199. Recent conversation: Agent: Hi, thanks for calling Maple Dental. How can I help you today? Caller: can i speak to a person please"
+        }
+      }
+    ],
+    "transfer_events": [
+      {
+        "ts": 1793770885.9338672,
+        "mode": "blind",
+        "error": "SIP transfer failed: call transfer failed: sip status: 486: Busy Here",
+        "reason": "The caller asked to speak to a person.",
+        "status": "busy",
+        "duration_s": 0.02,
+        "destination": "front_desk"
+      },
+      {
+        "ts": 1793770886.9463162,
+        "mode": "blind",
+        "error": null,
+        "reason": "The caller asked to speak to a person.",
+        "status": "completed",
+        "duration_s": 1.01,
+        "destination": "backup"
+      }
+    ]
+  },
+  "no_answer": {
+    "asked_at": 8090.728147413,
+    "refer_to": "tel:+15145550179",
+    "agent_after_failure": "please hold while i transfer you to a member of our team hmm i'm hurry nobody is available to take your call right now i can take a message and have someone call you back our youth go there",
+    "media_after_request": {
+      "frames": 2888,
+      "first_s": 0.02,
+      "last_s": 57.78,
+      "speech_segments_s": [
+        [
+          1.0,
+          5.5
+        ],
+        [
+          9.5,
+          10.5
+        ],
+        [
+          14.6,
+          21.7
+        ],
+        [
+          34.5,
+          35.5
+        ]
+      ],
+      "now_s": 57.8
+    },
+    "refers": [
+      "tel:+15145550179"
+    ],
+    "notifies": [
+      "SIP/2.0 100 Trying\r\n",
+      "SIP/2.0 487 Failed\r\n"
+    ],
+    "original_leg_end": "local_bye",
+    "transfer_outcomes": [
+      487
+    ],
+    "sip": [
+      "out INVITE sip:+15145554804@127.0.0.1:5060 SIP/2.0",
+      "in SIP/2.0 100 Processing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 200 OK",
+      "out ACK sip:+15145554804@127.0.0.1:5060 SIP/2.0",
+      "in REFER sip:+15145550199@127.0.0.1:5062 SIP/2.0",
+      "out SIP/2.0 202 Accepted",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "out BYE sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 OK"
+    ],
+    "conversation": {
+      "status": "completed",
+      "end_reason": "participant_disconnected",
+      "transfer": {
+        "ok": false,
+        "mode": null,
+        "status": "no_answer",
+        "attempts": [
+          {
+            "mode": "blind",
+            "error": "SIP transfer failed: request timed out",
+            "status": "no_answer",
+            "duration_s": 10.01,
+            "destination": "front_desk"
+          }
+        ],
+        "destination": null
+      },
+      "duration_s": 86.46
+    },
+    "tool_events": [
+      {
+        "tool": "transfer_to_human",
+        "ok": false,
+        "error": "transfer_no_answer",
+        "args": {
+          "reason": "The caller asked to speak to a person.",
+          "summary": "Caller asked to speak to a person. Calling from +15145550199. Recent conversation: Agent: Hi, thanks for calling Maple Dental. How can I help you today? Caller: can i speak to a person please"
+        }
+      }
+    ],
+    "transfer_events": [
+      {
+        "ts": 1793770932.167737,
+        "mode": "blind",
+        "error": "SIP transfer failed: request timed out",
+        "reason": "The caller asked to speak to a person.",
+        "status": "no_answer",
+        "duration_s": 10.01,
+        "destination": "front_desk"
+      }
+    ]
+  },
+  "caller_hangs_up_during_transfer": {
+    "asked_at": 8178.534728047,
+    "refer_to": "tel:+15145550179",
+    "refers": [
+      "tel:+15145550179"
+    ],
+    "notifies": [
+      "SIP/2.0 100 Trying\r\n"
+    ],
+    "original_leg_end": "local_bye",
+    "transfer_outcomes": [
+      487
+    ],
+    "sip": [
+      "out INVITE sip:+15145556351@127.0.0.1:5060 SIP/2.0",
+      "in SIP/2.0 100 Processing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 180 Ringing",
+      "in SIP/2.0 200 OK",
+      "out ACK sip:+15145556351@127.0.0.1:5060 SIP/2.0",
+      "in REFER sip:+15145550199@127.0.0.1:5062 SIP/2.0",
+      "out SIP/2.0 202 Accepted",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success",
+      "out BYE sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 OK",
+      "out NOTIFY sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 success"
+    ],
+    "conversation": {
+      "status": "completed",
+      "end_reason": "participant_disconnected",
+      "transfer": {
+        "ok": false,
+        "mode": null,
+        "status": "no_answer",
+        "attempts": [
+          {
+            "mode": "blind",
+            "error": "SIP transfer failed: call transfer failed: sip status: 487: Failed",
+            "status": "no_answer",
+            "duration_s": 1.12,
+            "destination": "front_desk"
+          }
+        ],
+        "destination": null
+      },
+      "duration_s": 34.64
+    },
+    "tool_events": [
+      {
+        "tool": "transfer_to_human",
+        "ok": false,
+        "error": "transfer_no_answer",
+        "args": {
+          "reason": "The caller asked to speak to a person.",
+          "summary": "Caller asked to speak to a person. Calling from +15145550199. Recent conversation: Agent: Hi, thanks for calling Maple Dental. How can I help you today? Caller: can i speak to a person please"
+        }
+      }
+    ],
+    "transfer_events": [
+      {
+        "ts": 1793771011.1056585,
+        "mode": "blind",
+        "error": "SIP transfer failed: call transfer failed: sip status: 487: Failed",
+        "reason": "The caller asked to speak to a person.",
+        "status": "no_answer",
+        "duration_s": 1.12,
+        "destination": "front_desk"
+      }
+    ]
+  },
+  "outbound_completed": {
+    "callee": "+15145550180",
+    "callee_heard": "hi this is alex from maple dental how can i assist you today",
+    "conversation": {
+      "status": "completed",
+      "end_reason": "participant_disconnected",
+      "direction": "outbound",
+      "caller_number": "+15145550180",
+      "callee_number": "+15145559556"
+    },
+    "sip": [
+      "in INVITE sip:+15145550180@127.0.0.1:5070 SIP/2.0",
+      "out SIP/2.0 100 Trying",
+      "out SIP/2.0 180 Ringing",
+      "out SIP/2.0 200 OK",
+      "in ACK sip:office@127.0.0.1:5070 SIP/2.0",
+      "out BYE sip:192.0.2.2:5060 SIP/2.0",
+      "in SIP/2.0 200 OK"
+    ],
+    "transcript": [
+      [
+        "assistant",
+        "Hi,",
+        true
+      ],
+      [
+        "user",
+        "hello who is calling please",
+        false
+      ],
+      [
+        "assistant",
+        "This is Alex from Maple Dental. How can I assist you today?",
+        false
+      ]
+    ]
+  },
+  "outbound_busy": {
+    "callee": "+15145550178",
+    "conversation": {
+      "status": "busy",
+      "end_reason": "dial_busy",
+      "direction": "outbound",
+      "caller_number": "+15145550178",
+      "callee_number": "+15145559196"
+    },
+    "sip": [
+      "in INVITE sip:+15145550178@127.0.0.1:5070 SIP/2.0",
+      "out SIP/2.0 100 Trying",
+      "out SIP/2.0 486 Busy Here",
+      "in ACK sip:+15145550178@127.0.0.1:5070 SIP/2.0"
+    ],
+    "transcript": []
+  }
+}

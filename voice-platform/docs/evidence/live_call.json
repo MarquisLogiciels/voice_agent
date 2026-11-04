@@ -1,0 +1,194 @@
+{
+  "room": "lab-44efa3f7",
+  "model": "qwen2.5-3b",
+  "turns": [
+    {
+      "user": "What time do you open on Monday?",
+      "response_latency_s": 4.54,
+      "agent_heard": "we open at nine am on monday is there anything else i can assist you with",
+      "agent_audio_s": 5.06
+    },
+    {
+      "user": "Do you have any openings next Monday?",
+      "response_latency_s": 2.82,
+      "agent_heard": "i will check our schedule for next monday hold please",
+      "agent_audio_s": 3.74,
+      "agent_heard_after_hold": "next monday we have available slots at nine am nine thirty am ten am and ten thirty am is there anything else i can assist you with"
+    }
+  ],
+  "dispatch_to_greeting_s": 1.22,
+  "greeting_heard": "hi thanks for calling maple dental how can i help you today",
+  "greeting_wer": 0.0,
+  "interruption": {
+    "agent_spoke_before_barge_in_s": 1.04,
+    "agent_stopped_after_s": 0.69
+  },
+  "conversation": {
+    "status": "completed",
+    "end_reason": "participant_disconnected",
+    "channel": "web",
+    "duration_s": 103.6,
+    "environment": "staging"
+  },
+  "metrics": {
+    "turns": 4,
+    "usage": {
+      "tts_chars": {
+        "tts:pico:-": 407
+      },
+      "stt_audio_s": {
+        "stt:vosk:vosk-en": 70.00000000000028
+      },
+      "llm_input_tokens": {
+        "llm:openai-compatible:qwen2.5-3b": 4484
+      },
+      "llm_output_tokens": {
+        "llm:openai-compatible:qwen2.5-3b": 106
+      }
+    },
+    "errors": 0,
+    "latency": {
+      "e2e": {
+        "max": 5.9156,
+        "p50": 3.3818,
+        "p90": 5.4088,
+        "p95": 5.6622,
+        "mean": 3.6641,
+        "count": 3
+      },
+      "eou": {
+        "max": 1.1949,
+        "p50": 1.1499,
+        "p90": 1.1941,
+        "p95": 1.1945,
+        "mean": 1.1151,
+        "count": 4
+      },
+      "stt": {
+        "max": 1.1941,
+        "p50": 1.1489,
+        "p90": 1.1932,
+        "p95": 1.1936,
+        "mean": 1.1141,
+        "count": 4
+      },
+      "llm_ttft": {
+        "max": 4.6719,
+        "p50": 2.6462,
+        "p90": 4.1823,
+        "p95": 4.4271,
+        "mean": 2.611,
+        "count": 4
+      },
+      "tts_ttfb": {
+        "max": 0.0488,
+        "p50": 0.0304,
+        "p90": 0.0477,
+        "p95": 0.0482,
+        "mean": 0.034,
+        "count": 5
+      }
+    },
+    "tool_calls": 1,
+    "agent_turns": 5,
+    "interruptions": 1,
+    "tool_failures": 0
+  },
+  "transcript": [
+    {
+      "role": "assistant",
+      "text": "Hi, thanks for calling Maple Dental. How can I help you today?",
+      "interrupted": false
+    },
+    {
+      "role": "user",
+      "text": "what time do you open on monday",
+      "interrupted": false
+    },
+    {
+      "role": "assistant",
+      "text": "We open at 9 AM on Monday. Is there anything else I can assist you with?",
+      "interrupted": false
+    },
+    {
+      "role": "user",
+      "text": "do you have any openings next monday",
+      "interrupted": false
+    },
+    {
+      "role": "assistant",
+      "text": "I'll check our schedule for next Monday. Hold please.",
+      "interrupted": false
+    },
+    {
+      "role": "assistant",
+      "text": "Next Monday, we have available slots at 9 AM, 9:30 AM, 10 AM, and 10:30 AM. Is there anything else I can assist you with?",
+      "interrupted": false
+    },
+    {
+      "role": "user",
+      "text": "can you describe all of the services you offer in detail",
+      "interrupted": false
+    },
+    {
+      "role": "assistant",
+      "text": "Sure, we offer cleanings,",
+      "interrupted": true
+    },
+    {
+      "role": "user",
+      "text": "sorry stuff actually never mind",
+      "interrupted": false
+    }
+  ],
+  "tool_calls": [
+    {
+      "tool": "check_availability",
+      "ok": true,
+      "args": {
+        "date": "next monday",
+        "time_preference": "any"
+      },
+      "error": null
+    }
+  ],
+  "latency_events": [
+    {
+      "ts": 1793767603.9419878,
+      "e2e": 3.3818449131367743,
+      "eou": 1.1074492931365967,
+      "llm_ttft": 2.2526060130003316,
+      "tts_ttfb": 0.021789606999846
+    },
+    {
+      "ts": 1793767618.7381704,
+      "e2e": 1.6949004029775097,
+      "eou": 1.1922657489776611,
+      "llm_ttft": 0.47980548099985754,
+      "tts_ttfb": 0.022829172999990988
+    },
+    {
+      "ts": 1793767664.6349692,
+      "e2e": 5.915590162048829,
+      "eou": 1.1948614120483398,
+      "llm_ttft": 4.671937070999775,
+      "tts_ttfb": 0.048791679000714794
+    }
+  ],
+  "event_types": {
+    "lifecycle": 1,
+    "transcript": 9,
+    "turn_latency": 3,
+    "follow_through": 1,
+    "tool": 1,
+    "llm_tool_call": 1
+  },
+  "follow_through": [
+    {
+      "ts": 1793767618.738217,
+      "reply": "I'll check our schedule for next Monday. Hold please."
+    }
+  ],
+  "recorded_at": "2026-11-04T04:48:07.473036+00:00",
+  "worker_log_errors": []
+}

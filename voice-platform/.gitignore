@@ -7,3 +7,7 @@ __pycache__/
 .ruff_cache/
 .env
 *.local.yaml
+
+# The repository root ignores docs/ (upstream LiveKit); the platform docs are part of this project.
+!docs/
+.import_linter_cache/
