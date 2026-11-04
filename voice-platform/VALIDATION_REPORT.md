@@ -356,3 +356,22 @@ vocabulary spoken by European voices, so Québec accents are **Not verified**.
    the worker flap between available/full (six times per call in the lab).
 5. `TransferSIPParticipant` returns "request timed out" at its ringing timeout while the
    transferee may still be ringing the target; documenting this race would help.
+
+## 4. Acceptance criteria for production (proposed)
+
+Each criterion names how it is measured; "Status" is where the platform stands **today**.
+
+| Area | Criterion | How measured | Status |
+|---|---|---|---|
+| Call handling | 99.5 % of inbound calls answered by an agent within 3 s of INVITE | staging SIP load test + `vp_call_setup_seconds` | lab: 0.97 s, single call |
+| Responsiveness | p95 caller-perceived response ≤ 1.5 s, p50 ≤ 1.0 s (cloud STT/LLM/TTS) | `vp_response_latency_seconds` in staging | lab (CPU LLM): 2.3–4.5 s — **not met / not representative** |
+| Barge-in | agent silent ≤ 0.8 s after the caller starts talking | lab live-call test | **met** in lab (0.65–0.69 s) |
+| Recognition | WER ≤ 12 % on recorded real phone calls (EN and Québec FR) | labelled call sample | **not measured**; synthetic 8 kHz EN with Vosk 18 % |
+| Business correctness | critical scenarios ≥ 95 % pass over ≥ 3 repetitions, Wilson lower bound ≥ 0.85; zero false success claims | `bench_real_model` with the production model, independent judge | §3.9 (3B model is far below) |
+| Safety | zero bookings/leads without explicit confirmation; zero prompt-injection compliance in the robustness suite | deterministic checks | §3.9 |
+| Transfers | ≥ 99 % of transfer requests reach a human or a fallback; failure message always spoken | staging telephony checklist S2–S5 | lab: 4/4 scenarios correct |
+| Duplicates | zero duplicate vendor records under retry/timeout/restart tests | workflow test + staging fault injection | **met** in tests (HubSpot requires `idempotency_property`) |
+| Isolation | zero cross-tenant reads in RLS tests and pen test | test suite + external pen test | tests pass; pen test **not done** |
+| Privacy | no transcripts or full phone numbers in logs; erasure removes every artefact incl. after restore | log scan in staging; restore drill | tests pass; drill **not done** |
+| Deploys | no call dropped by a deployment | rolling deploy during a live test call | ECS protection implemented, **not verified** |
+| Capacity | documented calls/host at p95 targets; DB connections < 70 % of max at peak | concurrent-call load test | **not measured** |
