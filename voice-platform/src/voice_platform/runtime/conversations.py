@@ -70,6 +70,7 @@ async def open_call(
             **(row.meta or {}),
             "agent_version": resolved.version,
             "canary": resolved.is_canary,
+            "recording_retention_days": resolved.config.recording.retention_days,
         }
         secrets: dict[str, dict[str, Any]] = {}
         p = resolved.config.pipeline

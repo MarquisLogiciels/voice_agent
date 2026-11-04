@@ -20,6 +20,7 @@ from ...config.service import AgentService, parse_config
 from ...core import jobs
 from ...core.db import DbScope
 from ...core.models import AgentVersion, EvalResult, EvalRun, EvalScenario, OptimizationRun
+from ...core.retention import RETENTION_JOB, sweep
 from ...evaluation.evaluators import LLMJudge
 from ...evaluation.runner import BenchmarkRunner
 from ...evaluation.scenario import Scenario, load_scenarios
@@ -64,14 +65,46 @@ class JobRunner:
         self._llm_resolver = llm_resolver
         self.handlers: dict[str, Callable[[jobs.ClaimedJob], Awaitable[dict[str, Any]]]] = {
             INGEST_JOB: self._ingest,
+            RETENTION_JOB: self._retention,
             EVAL_JOB: self._evaluate,
             OPTIMIZE_JOB: self._optimize,
         }
 
     # --- loop --------------------------------------------------------------------------------
+    async def schedule_periodic(self) -> None:
+        """Enqueue the retention sweep at most once per hour across all runners."""
+        async with self.s.db.session(DbScope.system()) as sess:
+            await sess.execute(
+                sa.text("select pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                {"k": RETENTION_JOB},
+            )
+            recent = await sess.scalar(
+                sa.text(
+                    "select 1 from jobs where kind = :k and created_at > now() - interval '1 hour'"
+                    " limit 1"
+                ),
+                {"k": RETENTION_JOB},
+            )
+            if recent is None:
+                await jobs.enqueue(
+                    sess,
+                    kind=RETENTION_JOB,
+                    tenant_id=None,
+                    payload={},
+                    priority=500,
+                    max_attempts=2,
+                )
+
     async def run_forever(self, stop: asyncio.Event) -> None:
         logger.info("job runner started", extra={"worker": self.worker_id})
+        last_schedule = 0.0
         while not stop.is_set():
+            if time.monotonic() - last_schedule > 300:
+                last_schedule = time.monotonic()
+                try:
+                    await self.schedule_periodic()
+                except Exception:
+                    logger.warning("periodic scheduling failed", exc_info=True)
             try:
                 worked = await self.run_once()
             except Exception:
@@ -125,6 +158,9 @@ class JobRunner:
                 logger.warning("lease extension failed", exc_info=True)
 
     # --- handlers ----------------------------------------------------------------------------
+    async def _retention(self, job: jobs.ClaimedJob) -> dict[str, Any]:
+        return await sweep(self.s.db, self.s.blobs)
+
     async def _ingest(self, job: jobs.ClaimedJob) -> dict[str, Any]:
         assert job.tenant_id is not None
         return await self.s.knowledge.process(job.tenant_id, uuid.UUID(job.payload["document_id"]))
