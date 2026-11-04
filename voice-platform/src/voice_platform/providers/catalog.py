@@ -177,6 +177,21 @@ def _livekit_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
     return inference.STT(model=ref.model or "deepgram/nova-3", language=_lang(ref, ctx))
 
 
+class VoskOptions(_Opts):
+    url: str = Field(pattern=r"^wss?://[^\s]+$", description="Vosk server WebSocket URL")
+
+
+def _vosk_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
+    from .local import VoskSTT
+
+    url = VoskOptions.model_validate(ref.options).url
+    if not ctx.is_trusted(url):
+        raise ValueError(
+            "vosk url must be a platform-operated endpoint (VP_TRUSTED_PROVIDER_ENDPOINTS)"
+        )
+    return VoskSTT(url=url, language=_lang(ref, ctx))
+
+
 # ============================================================================================
 # LLM
 # ============================================================================================
@@ -205,7 +220,30 @@ def _openai_llm(ref: ProviderRef, ctx: BuildContext) -> Any:
 
 
 class OpenAICompatibleOptions(OpenAILLMOptions):
-    base_url: str = Field(pattern=r"^https://[^\s]+$")
+    base_url: str = Field(pattern=r"^https?://[^\s]+$")
+
+
+def check_untrusted_endpoint(url: str) -> None:
+    """A tenant-supplied endpoint must be public HTTPS (no private/metadata addresses)."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlsplit
+
+    from ..shared.http import EgressBlockedError, EgressPolicy
+
+    policy = EgressPolicy(allowed_ports=(443,))
+    try:
+        policy.check_url(url)
+    except EgressBlockedError as e:
+        raise ValueError(f"endpoint refused: {e.message}") from e
+    host = urlsplit(url).hostname or ""
+    try:
+        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except OSError as e:
+        raise ValueError(f"cannot resolve {host}") from e
+    for info in infos:
+        if not policy.ip_allowed(ipaddress.ip_address(info[4][0])):
+            raise ValueError(f"{host} resolves to a non-public address")
 
 
 def _openai_compatible_llm(ref: ProviderRef, ctx: BuildContext) -> Any:
@@ -217,12 +255,24 @@ def _openai_compatible_llm(ref: ProviderRef, ctx: BuildContext) -> Any:
         opts["temperature"] = ref.temperature
     if not ref.model:
         raise ValueError("openai-compatible provider requires an explicit model")
-    return openai.LLM(
-        model=ref.model,
-        base_url=base_url,
-        api_key=_key(ref, ctx, "OPENAI_COMPATIBLE_API_KEY"),
-        **opts,
-    )
+    if ctx.is_trusted(base_url):
+        # platform-operated endpoint (e.g. in-VPC vLLM/Ollama): platform key allowed
+        api_key = _key(ref, ctx, "OPENAI_COMPATIBLE_API_KEY")
+        from livekit.agents import NOT_GIVEN
+
+        if api_key is NOT_GIVEN:
+            api_key = "not-required"  # most self-hosted servers ignore the key
+    else:
+        # Tenant-supplied endpoint: never send a platform secret to it, and refuse private
+        # networks (SSRF). The tenant must bring its own key as a credential.
+        if not ref.credential:
+            raise ValueError(
+                "untrusted openai-compatible endpoints require a tenant credential "
+                "(platform keys are only sent to VP_TRUSTED_PROVIDER_ENDPOINTS)"
+            )
+        check_untrusted_endpoint(base_url)
+        api_key = _key(ref, ctx)
+    return openai.LLM(model=ref.model, base_url=base_url, api_key=api_key, **opts)
 
 
 class AnthropicLLMOptions(_Opts):
@@ -381,6 +431,24 @@ def _livekit_tts(ref: ProviderRef, ctx: BuildContext) -> Any:
     if ref.language:
         kwargs["language"] = ref.language
     return inference.TTS(model=ref.model or "cartesia/sonic-3", **kwargs)
+
+
+class LocalTTSOptions(_Opts):
+    rate_wpm: int | None = Field(default=None, ge=80, le=400)
+
+
+def _local_tts(engine: Literal["pico", "espeak"]) -> Any:
+    def factory(ref: ProviderRef, ctx: BuildContext) -> Any:
+        from .local import LocalTTS
+
+        return LocalTTS(
+            engine=engine,
+            language=ref.language or ctx.default_language,  # type: ignore[arg-type]
+            voice=ref.voice,
+            rate_wpm=_opts(LocalTTSOptions, ref).get("rate_wpm"),
+        )
+
+    return factory
 
 
 # ============================================================================================
@@ -571,6 +639,20 @@ def register_builtin_providers(reg: ProviderRegistry) -> None:
     )
 
     add(
+        P.STT,
+        "vosk",
+        "Vosk (self-hosted)",
+        _vosk_stt,
+        "voice-platform",
+        capabilities=Capabilities(
+            streaming=True,
+            interim_results=True,
+            emits_end_of_speech=True,
+            notes="self-hosted; endpoint must be trusted",
+        ),
+        options_model=VoskOptions,
+    )
+    add(
         P.LLM,
         "openai",
         "OpenAI",
@@ -588,7 +670,6 @@ def register_builtin_providers(reg: ProviderRegistry) -> None:
         "OpenAI-compatible endpoint",
         _openai_compatible_llm,
         "livekit-plugins-openai",
-        secret_env=("OPENAI_COMPATIBLE_API_KEY",),
         options_model=OpenAICompatibleOptions,
     )
     add(
@@ -697,6 +778,20 @@ def register_builtin_providers(reg: ProviderRegistry) -> None:
         default_model="cartesia/sonic-3",
     )
 
+    local_engines: tuple[tuple[Literal["pico", "espeak"], str], ...] = (
+        ("pico", "SVOX Pico (local)"),
+        ("espeak", "eSpeak NG (local)"),
+    )
+    for engine, label in local_engines:
+        add(
+            P.TTS,
+            engine,
+            label,
+            _local_tts(engine),
+            "voice-platform",
+            capabilities=Capabilities(streaming=False, notes="lab/CI grade voice"),
+            options_model=LocalTTSOptions,
+        )
     add(
         P.VAD,
         "silero",

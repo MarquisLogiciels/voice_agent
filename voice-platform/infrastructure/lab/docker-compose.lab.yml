@@ -1,0 +1,40 @@
+# Self-hosted validation lab: real LiveKit server + SIP, real open-weights LLM (Ollama), real
+# STT (Vosk). No vendor cloud accounts needed. Used by tests/live (opt-in: --run-live-lab).
+#   docker compose -f voice-platform/infrastructure/lab/docker-compose.lab.yml up -d
+name: vp-lab
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: ["--dev", "--bind", "0.0.0.0", "--redis-host", "127.0.0.1:6379",
+              "--node-ip", "127.0.0.1"]
+    network_mode: host          # WebRTC/UDP without NAT gymnastics in the lab
+    depends_on: [redis]
+  redis:
+    image: redis:7-alpine
+    network_mode: host
+  sip:
+    image: livekit/sip:latest
+    network_mode: host
+    environment:
+      SIP_CONFIG_BODY: |
+        api_key: devkey
+        api_secret: secret
+        ws_url: ws://127.0.0.1:7880
+        redis: {address: 127.0.0.1:6379}
+        sip_port: 5060
+        rtp_port: 10000-10100
+        use_external_ip: false
+        logging: {level: debug}
+    depends_on: [livekit]
+  ollama:
+    image: ollama/ollama:0.40.14
+    ports: ["11434:11434"]
+    volumes: ["${VP_LAB_MODELS:-/tmp/claude-0/models}:/models:ro", "ollama:/root/.ollama"]
+    environment: {OLLAMA_KEEP_ALIVE: "24h", OLLAMA_NUM_PARALLEL: "1"}
+  vosk-en:
+    image: alphacep/kaldi-en:latest
+    ports: ["2700:2700"]
+  vosk-fr:
+    image: alphacep/kaldi-fr:latest
+    ports: ["2701:2700"]
+volumes: {ollama: {}}

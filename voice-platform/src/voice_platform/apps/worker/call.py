@@ -21,7 +21,7 @@ from ...runtime.conversations import mark_call, open_call
 from ...runtime.recorder import PostgresSink
 from ...runtime.session import CallInfo, RuntimeDeps, RuntimeSession, build_runtime_session
 from ...shared.logging import bind_log_context, get_logger, mask_phone
-from ...telephony.outbound import DispatchMetadata
+from ...telephony.outbound import DispatchMetadata, WebDispatch
 from ...telephony.recording import RecordingService
 from ...telephony.routing import ATTR_CALLER_NUMBER, ATTR_TRUNK_NUMBER, route_inbound
 from ...telephony.sip import LiveKitTransport, SipCallError
@@ -50,11 +50,14 @@ class CallHandler:
         started = time.monotonic()
         ctx = self.ctx
         meta = DispatchMetadata.parse(ctx.job.metadata)
+        web = WebDispatch.parse(ctx.job.metadata)
         await ctx.connect()
         m.ACTIVE_CALLS.inc()
         ctx.add_shutdown_callback(self._finalize)
         if meta is not None:
             await self._outbound(meta)
+        elif web is not None:
+            await self._web(web)
         else:
             await self._inbound()
         if self.rs is not None:
@@ -87,6 +90,28 @@ class CallHandler:
             caller_identity=participant.identity,
             conversation_id=None,
             caller_context=None,
+        )
+
+    # --- web/app sessions -------------------------------------------------------------------
+    async def _web(self, meta: WebDispatch) -> None:
+        try:
+            participant = await asyncio.wait_for(self.ctx.wait_for_participant(), 60)
+        except TimeoutError:
+            logger.warning("web caller never joined; ending job")
+            self.ctx.shutdown("no participant")
+            return
+        self.tenant_id = uuid.UUID(meta.tenant_id)
+        await self._start(
+            tenant_id=self.tenant_id,
+            agent_id=uuid.UUID(meta.agent_id),
+            environment=meta.environment,
+            direction="inbound",
+            caller=None,
+            business=None,
+            caller_identity=participant.identity,
+            conversation_id=uuid.UUID(meta.conversation_id) if meta.conversation_id else None,
+            caller_context=None,
+            channel="web",
         )
 
     # --- outbound ----------------------------------------------------------------------------
@@ -152,6 +177,7 @@ class CallHandler:
         caller_identity: str,
         conversation_id: uuid.UUID | None,
         caller_context: str | None,
+        channel: str = "phone",
     ) -> None:
         svc = self.services
         ctx = self.ctx
@@ -167,6 +193,7 @@ class CallHandler:
             caller_number=caller,
             callee_number=business,
             conversation_id=conversation_id,
+            channel=channel,
         )
         self.conversation_id = opened.conversation_id
         cfg = opened.resolved.config
@@ -297,9 +324,6 @@ class CallHandler:
         self.rs = rs
         rs.session.on("close", self._on_close)
 
-        if cfg.recording.enabled and cfg.recording.consent_required:
-            # announced before recording starts; the greeting follows
-            rs.session.say(cfg.recording.consent_announcement, allow_interruptions=False)
         await rs.session.start(
             agent=rs.agent,
             room=ctx.room,
@@ -309,7 +333,14 @@ class CallHandler:
         )
         rs.start_policies()
         if cfg.recording.enabled:
-            await self._start_recording(tenant_id, opened.conversation_id)
+            # PlatformAgent.on_enter plays the consent announcement first; only start the
+            # egress once it has finished playing (bounded wait).
+            try:
+                await asyncio.wait_for(rs.agent.announcements_done.wait(), timeout=30)
+            except TimeoutError:
+                logger.warning("consent announcement did not finish; recording not started")
+            else:
+                await self._start_recording(tenant_id, opened.conversation_id)
 
     async def _start_recording(self, tenant_id: uuid.UUID, conv_id: uuid.UUID) -> None:
         try:

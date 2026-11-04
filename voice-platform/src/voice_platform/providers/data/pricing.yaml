@@ -47,3 +47,9 @@ prices:
     "*": {usd_per_1m_input_tokens: 32.0, usd_per_1m_output_tokens: 64.0}
   realtime/google-realtime:
     "*": {usd_per_1m_input_tokens: 3.0, usd_per_1m_output_tokens: 12.0}
+  stt/vosk:
+    "*": {usd_per_audio_minute: 0.0}
+  tts/pico:
+    "*": {usd_per_1k_chars: 0.0}
+  tts/espeak:
+    "*": {usd_per_1k_chars: 0.0}

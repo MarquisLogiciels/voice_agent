@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # real customers.
     outbound_allowed_prefixes: list[str] = Field(default_factory=list)
 
+    # Platform-operated provider endpoints (JSON list of URL prefixes), e.g. an in-VPC vLLM or
+    # Vosk server. Read by the provider registry via the environment.
+    trusted_provider_endpoints: list[str] = Field(default_factory=list)
+
     # --- integrations -----------------------------------------------------------------------
     allow_insecure_http_integrations: bool = False  # http:// and private IPs; dev only
     integration_default_timeout_s: float = Field(default=8.0, gt=0, le=60)

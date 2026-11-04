@@ -127,8 +127,8 @@ class ProviderRegistry:
             raise ProviderError(
                 f"{desc.display_name} needs the '{desc.package}' package: {e}"
             ) from e
-        except MissingSecretError as e:
-            raise ProviderError(str(e)) from e
+        except (MissingSecretError, ValueError) as e:
+            raise ProviderError(f"{desc.kind.value}/{desc.name}: {e}") from e
 
 
 def provider_key(kind: ProviderKind | str, ref: ProviderRef) -> str:

@@ -89,10 +89,34 @@ class DispatchMetadata:
             data = json.loads(raw or "{}")
         except json.JSONDecodeError:
             return None
-        if data.get("kind") != "outbound":
+        if not isinstance(data, dict) or data.get("kind") != "outbound":
             return None
         data.pop("kind")
         return cls(**data)
+
+
+@dataclass(frozen=True)
+class WebDispatch:
+    """Dispatch metadata for browser/app voice sessions (no SIP participant)."""
+
+    tenant_id: str
+    agent_id: str
+    environment: str = "prod"
+    conversation_id: str | None = None
+
+    def to_json(self) -> str:
+        return json.dumps({"kind": "web", **self.__dict__})
+
+    @classmethod
+    def parse(cls, raw: str) -> WebDispatch | None:
+        try:
+            data = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict) or data.get("kind") != "web":
+            return None
+        data.pop("kind")
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
 async def dispatch_outbound(lkapi: Any, *, agent_name: str, meta: DispatchMetadata) -> str:

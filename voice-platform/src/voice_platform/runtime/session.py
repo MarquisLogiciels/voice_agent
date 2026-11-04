@@ -189,6 +189,9 @@ def build_runtime_session(
         executor=executor,
         extra_tools=extra_tools,
         knowledge=deps.knowledge,
+        announcements=[cfg.recording.consent_announcement]
+        if cfg.recording.enabled and cfg.recording.consent_required
+        else [],
     )
     recorder.attach(session)
     recorder.add(

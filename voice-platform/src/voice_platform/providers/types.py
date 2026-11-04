@@ -54,6 +54,12 @@ class BuildContext:
     default_language: str = "en"
     vad: Any | None = None
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
+    trusted_endpoints: tuple[str, ...] = field(default_factory=lambda: _trusted_from_env())
+    """Platform-operated endpoint prefixes (self-hosted LLM/STT). Only these may receive
+    platform-level keys or use plain HTTP / private addresses."""
+
+    def is_trusted(self, url: str) -> bool:
+        return any(url.rstrip("/").startswith(p.rstrip("/")) for p in self.trusted_endpoints if p)
 
     def secret(self, ref: ProviderRef, env_names: tuple[str, ...]) -> str | None:
         if ref.credential:
@@ -75,6 +81,19 @@ class BuildContext:
             url = payload.get("base_url")
             return str(url) if url else None
         return None
+
+
+def _trusted_from_env() -> tuple[str, ...]:
+    import json
+
+    raw = os.environ.get("VP_TRUSTED_PROVIDER_ENDPOINTS", "")
+    if not raw:
+        return ()
+    try:
+        values = json.loads(raw)
+    except ValueError:
+        values = raw.split(",")
+    return tuple(str(v).strip() for v in values if str(v).strip())
 
 
 class MissingSecretError(Exception):

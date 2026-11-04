@@ -44,8 +44,12 @@ class PlatformAgent(Agent):
         extra_tools: list[Any] | None = None,
         knowledge: KnowledgeSearch | None = None,
         chat_ctx: ChatContext | None = None,
+        announcements: list[str] | None = None,
     ) -> None:
         self.config = config
+        self.announcements = list(announcements or [])
+        self.announcements_done = asyncio.Event()
+        """Set once mandatory announcements (e.g. recording consent) finished playing."""
         self.executor = executor
         self.knowledge = knowledge
         self.compactor = ContextCompactor(config.conversation.context)
@@ -58,6 +62,19 @@ class PlatformAgent(Agent):
         )
 
     async def on_enter(self) -> None:
+        handles = [self.session.say(text, allow_interruptions=False) for text in self.announcements]
+        if handles:
+
+            async def _wait() -> None:
+                try:
+                    for h in handles:
+                        await h.wait_for_playout()
+                finally:
+                    self.announcements_done.set()
+
+            self._announce_task = asyncio.create_task(_wait())
+        else:
+            self.announcements_done.set()
         g = self.config.greeting
         if g.mode == "say":
             self.session.say(g.text, allow_interruptions=g.allow_interruptions)
