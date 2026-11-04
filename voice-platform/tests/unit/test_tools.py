@@ -287,3 +287,14 @@ async def test_custom_rest_tool_through_executor() -> None:
     done = await ex.execute("crm__open_ticket", {"issue": "broken", "caller_confirmed": True})
     assert done.ok and done.data == {"ticket": 7}
     await integ.aclose()
+
+
+async def test_ledger_outage_refuses_side_effects() -> None:
+    class DeadLedger(InMemoryLedger):
+        async def begin(self, *a: Any, **k: Any) -> Any:
+            raise ConnectionError("database down")
+
+    suite = SandboxSuite()
+    ex = ToolExecutor.for_agent(_env(_config(), suite, ledger=DeadLedger()))
+    out = await ex.execute("create_lead", {"title": "Quote request", "caller_confirmed": True})
+    assert not out.ok and out.error == "unavailable" and not suite.state.leads

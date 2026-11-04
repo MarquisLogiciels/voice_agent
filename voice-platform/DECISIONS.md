@@ -110,3 +110,19 @@ enrichment and a redaction filter on the root logger so framework logs get the s
 **Decision.** Integrations use `httpx.AsyncClient` (connection pooling, timeouts, `respx` for
 tests). The SSRF guard is implemented as a custom httpcore network backend that validates the
 resolved IP at connect time (defeats DNS rebinding between check and connect).
+
+## ADR-017 — Optimizer accepts partial improvements between iterations
+**Context.** Greedy hill-climbing on pass rate rejected each of two complementary fixes that
+only pass scenarios together (observed in tests).
+**Decision.** Between iterations a candidate with *no regressions* and equal pass rate is kept
+if its mean score improves by ≥ 0.01; the final gate against the original baseline still
+requires a strictly higher pass rate, the minimum pass rate and no critical regressions.
+
+## ADR-018 — Tool side effects fail closed without an idempotency ledger
+**Decision.** If the ledger cannot reserve a key (database down), a deduplicated
+(consequential) tool returns `unavailable` instead of executing. Duplicate external writes are
+worse than a deferred action the agent can hand to a human.
+
+## ADR-019 — Provider failures counted only when final
+**Decision.** The circuit breaker counts `error` events with `recoverable=false` and
+FallbackAdapter availability changes; errors LiveKit is still retrying don't open circuits.

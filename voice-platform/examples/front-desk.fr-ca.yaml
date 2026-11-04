@@ -1,0 +1,79 @@
+# Bilingual (fr-CA / en) dental-clinic receptionist. Validate with:
+#   POST /v1/tenants/{tid}/agents/validate   or   vp eval --config examples/front-desk.fr-ca.yaml
+name: Réception Clinique Érable
+language: fr-CA
+supported_languages: [en]
+persona:
+  name: Camille
+  role: réceptionniste
+  personality: chaleureuse, efficace et professionnelle
+instructions: |
+  Tu réponds aux appels de la Clinique dentaire Érable. Tu prends, déplaces et annules des
+  rendez-vous, réponds aux questions sur les services et les prix à l'aide de la base de
+  connaissances, et transfères à l'équipe quand l'appelant le demande ou en cas d'urgence.
+  Pour une douleur intense ou un saignement qui ne s'arrête pas, propose le premier rendez-vous
+  d'urgence disponible ou transfère immédiatement.
+business:
+  name: Clinique dentaire Érable
+  timezone: America/Toronto
+  address: 123 rue Saint-Denis, Montréal (QC)
+  hours:
+    schedule: {mon: ["08:00-18:00"], tue: ["08:00-18:00"], wed: ["08:00-20:00"], thu: ["08:00-18:00"], fri: ["08:00-16:00"]}
+  appointments:
+    default_duration_min: 45
+    min_notice_min: 120
+    max_days_ahead: 60
+    hours:
+      schedule: {mon: ["08:00-17:00"], tue: ["08:00-17:00"], wed: ["08:00-19:00"], thu: ["08:00-17:00"], fri: ["08:00-15:00"]}
+greeting:
+  mode: say
+  text: "Bonjour, Clinique dentaire Érable, Camille à l'appareil. Comment puis-je vous aider? Hello, how can I help?"
+pipeline:
+  mode: cascaded
+  stt:
+    provider: deepgram
+    model: nova-3
+    language: fr-CA
+    options: {smart_format: true, keyterm: ["Érable", "détartrage", "blanchiment"]}
+    fallbacks: [{provider: assemblyai, language: fr}]
+  llm:
+    provider: openai
+    model: gpt-4.1-mini
+    temperature: 0.3
+    connection: {timeout_s: 8, max_retries: 1}
+    fallbacks: [{provider: anthropic, model: claude-haiku-4-5}]
+  tts:
+    provider: elevenlabs
+    model: eleven_flash_v2_5
+    voice: REPLACE_WITH_VOICE_ID
+    language: fr
+    fallbacks: [{provider: cartesia, model: sonic-2, voice: REPLACE_WITH_VOICE_ID, language: fr}]
+  vad: {provider: silero}
+  turn_detection: {mode: model, provider: livekit, model: multilingual}
+turn_handling:
+  endpointing: {min_delay_s: 0.45, max_delay_s: 3.0}
+  interruption: {enabled: true, min_duration_s: 0.5, false_interruption_timeout_s: 2.0}
+  preemptive_generation: true
+conversation:
+  max_duration_s: 1200
+  silence: {user_away_timeout_s: 10, max_reprompts: 2, reprompt_messages: ["Êtes-vous toujours là?", "Je ne vous entends plus."], goodbye_message: "Il semble que nous ayons été coupés. N'hésitez pas à rappeler. Au revoir!"}
+tools:
+  enabled: [lookup_customer, create_lead, check_availability, book_appointment, get_appointments, cancel_appointment, search_knowledge_base, transfer_to_human, send_sms, end_call]
+integrations: {crm: hubspot-main, calendar: google-agenda, messaging: twilio-sms}
+knowledge: {knowledge_base_ids: ["REPLACE_WITH_KB_UUID"], mode: tool, top_k: 4}
+transfer:
+  enabled: true
+  default_destination: reception
+  outbound_trunk_id: REPLACE_WITH_LIVEKIT_OUTBOUND_TRUNK
+  destinations:
+    - {name: reception, description: Accueil, phone_number: "+15145550100", mode: warm, fallback: [gestion]}
+    - {name: gestion, description: Gérante, phone_number: "+15145550101", mode: blind,
+       hours: {schedule: {mon: ["09:00-17:00"], tue: ["09:00-17:00"], wed: ["09:00-17:00"], thu: ["09:00-17:00"], fri: ["09:00-17:00"]}}}
+recording: {enabled: true, consent_required: true, consent_announcement: "Cet appel peut être enregistré à des fins de qualité. This call may be recorded.", retention_days: 30}
+sms:
+  enabled: true
+  from_number: "+15145550000"
+  allowed_templates:
+    confirmation: "Clinique Érable : votre rendez-vous est confirmé pour {when}. Répondez STOP pour ne plus recevoir de messages."
+environment_overrides:
+  staging: {integrations: {crm: sandbox, calendar: sandbox, messaging: sandbox}}

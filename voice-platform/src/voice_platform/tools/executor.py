@@ -253,7 +253,17 @@ class ToolExecutor:
             key = "tool:" + stable_hash(
                 env.conversation_id, spec.name, json.dumps(canonical, sort_keys=True, default=str)
             )
-            existing = await env.ledger.begin(key, spec.name, canonical)
+            try:
+                existing = await env.ledger.begin(key, spec.name, canonical)
+            except Exception:
+                # Without a ledger entry we cannot guarantee idempotency: refuse the side effect.
+                logger.exception("tool ledger unavailable", extra={"tool": spec.name})
+                return ToolOutcome(
+                    ok=False,
+                    error="unavailable",
+                    message="The system is temporarily unable to complete this. Do not claim "
+                    "success; offer to take a message or transfer.",
+                )
             if existing is not None:
                 if existing.status == "succeeded":
                     replay = ToolOutcome.model_validate(existing.response)

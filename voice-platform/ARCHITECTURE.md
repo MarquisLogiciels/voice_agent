@@ -19,8 +19,8 @@ voice-platform/
 │   │                   RBAC, API keys, credentials vault, audit log, job queue
 │   ├── config/         agent configuration: AgentConfig schema, validation, versioning,
 │   │                   diffing, deployments, canary selection
-│   ├── providers/      AI provider registry (STT/LLM/TTS/VAD/turn detection/realtime/
-│   │                   embeddings) → LiveKit plugin instances; fallback + health tracking
+│   ├── providers/      AI provider registry (STT/LLM/TTS/VAD/turn detection/realtime)
+│   │                   → LiveKit plugin instances; fallback, health tracking, pricing/cost
 │   ├── runtime/        live agent execution: session builder, PlatformAgent, conversation
 │   │                   policies (silence, duration, context compaction), call recorder
 │   ├── tools/          standardized agent tools + the guarded ToolExecutor
@@ -28,10 +28,11 @@ voice-platform/
 │   │                   custom REST, Twilio messaging, in-memory sandbox adapters
 │   ├── telephony/      LiveKit SIP provisioning, inbound routing, outbound dialing,
 │   │                   blind/warm transfers, recording (egress), Twilio trunking
-│   ├── knowledge/      document ingestion, extraction, chunking, embeddings, hybrid retrieval
+│   ├── knowledge/      document ingestion, extraction, chunking, embeddings, hybrid retrieval,
+│   │                   retrieval evaluation
 │   ├── evaluation/     scenarios, simulated callers, evaluators, benchmark runner
 │   ├── optimization/   candidate generation, comparison, promotion gate, reports
-│   ├── observability/  Prometheus metrics, OpenTelemetry, latency & cost accounting
+│   ├── observability/  Prometheus metrics, OpenTelemetry span helpers and setup, statistics
 │   └── apps/
 │       ├── api/        FastAPI management API + webhooks + admin dashboard (static SPA)
 │       ├── worker/     LiveKit AgentServer entrypoint (executes calls)
@@ -40,21 +41,30 @@ voice-platform/
 ├── migrations/         Alembic migrations (schema + row-level security)
 ├── scenarios/          evaluation scenario library (YAML)
 ├── tests/              unit / integration / e2e / load / evaluations
+├── examples/           sample agent configurations
 ├── infrastructure/     docker, compose, terraform (AWS), monitoring (Prometheus/Grafana/OTel)
-└── docs/               runbooks, provider & integration guides, compliance notes
+└── docs/               runbooks, provider & integration guides, security/privacy notes
 ```
 
-Dependency direction (enforced with `import-linter`, see `.importlinter`):
+Dependency direction (enforced in CI with `import-linter`, see `.importlinter`; higher layers
+may import lower ones, never the reverse):
 
 ```
-apps ──► runtime, telephony, evaluation, optimization, knowledge, core, config
-runtime ──► providers, tools, integrations, telephony, knowledge, config, observability, shared
-tools ──► integrations, telephony(interfaces), knowledge(interfaces), shared
-integrations, providers, knowledge ──► shared (+ config schema types)
-config ──► shared
-core ──► shared
-shared ──► (stdlib + third-party only)
+apps            (api, worker, jobs, cli — composition roots)
+optimization
+evaluation
+runtime         (PlatformAgent, session factory, recorder, policies)
+telephony       (SIP transport, transfers, outbound, provisioning, recording)
+tools           (catalogue, executor, ledger, scheduling)
+knowledge | integrations | providers
+config          (AgentConfig, versioning service)
+core            (models, db/RLS, auth, RBAC, vault, audit, jobs, retention)
+observability   (metrics, span helpers; tracing_setup is used by apps only)
+shared          (settings, logging, errors, crypto, resilience, http, blobstore, phone)
 ```
+
+A second contract forbids `tools`, `integrations`, `config`, `core` and `knowledge` from
+importing LiveKit at all, so business logic stays testable without the framework.
 
 `runtime` is the only package that imports `livekit.agents.voice`. Business logic (tools,
 integrations, config) is framework-agnostic and testable without audio.
