@@ -117,7 +117,8 @@ Evidence for every item: VALIDATION_REPORT.md. Labels as in PRODUCTION_READINESS
 - [x] Audio harness: WER by voice/rate/noise/telephone channel (EN/FR), VAD boundaries,
       flush latency, false triggers
 - [x] Real-model benchmark + optimizer run (see VALIDATION_REPORT §3.9)
-- [ ] Warm transfer, recording/egress, DTMF, LLM-initiated transfer announcement (F5)
+- [x] LLM-initiated transfer announcement (F5) — verified with a deterministic model
+- [ ] Warm transfer, recording/egress, DTMF; SIP lab re-run with the T6 mitigation
 - [ ] Real carrier + vendor sandboxes (docs/telephony-staging.md checklist)
 
 **Defects fixed this session (found by running, not by reading)**: worker could never start a
@@ -130,9 +131,11 @@ erased recordings recoverable from S3 versions; SSE header bypassing the KMS key
 calls 120 s into a deployment.
 
 **Audit fixes**: F1 consent ordering, F2 booking race, F3 IntegrityError→409, F4 bounded
-extraction, F7 http for trusted endpoints; F5/F6 open (F6: model turn detection needs model
-files at build time — the image build downloads them; workers without them fail at session
-build, documented).
+extraction, F5 announcement inside the transfer tool (verified in the SIP lab), F6 turn
+detector registered in the worker main process (unit tested; real model files not verified),
+F7 http for trusted endpoints. Benchmark-driven: B1 escape-hatch negation, B2 follow-through
+coverage + no spoken tool-call text, B3 document prompt-injection sanitiser; T6 LiveKit REFER
+race mitigated (unit tested).
 
 **Infrastructure**: terraform fmt/validate + checkov in CI, VPC module pinned to a commit,
 tightened SGs, compose health checks; pip-audit / dependency review / Trivy in CI.
@@ -143,6 +146,6 @@ tightened SGs, compose health checks; pip-audit / dependency review / Trivy in C
    model and an independent judge.
 2. Build and scan the image in CI; `terraform plan` in a staging account.
 3. PgBouncer/RDS Proxy or smaller per-job DB pools; concurrent-call load test; set `load_fnc`.
-4. Exercise warm transfer, recording egress, DTMF; LLM-initiated transfer announcement (F5).
+4. Exercise warm transfer, recording egress, DTMF; re-run the SIP lab with the T6 mitigation.
 5. Dashboard SSO/MFA via the customer IdP; per-session revocation; KMS-backed vault keys.
 6. HubSpot portals: create the idempotency property; Salesforce: External ID field.

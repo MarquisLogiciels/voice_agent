@@ -1,0 +1,40 @@
+{
+  "note": "Captured from test output and the LiveKit SIP container log on 2026-11-04; the per-run JSON was overwritten by a later aborted run.",
+  "llm_initiated_transfer (F5), PASSED": {
+    "model": "deterministic OpenAI-compatible fake (tests/lab/fake_llm.py)",
+    "heard_before_refer": "please hold while i transfer you to a member of our team",
+    "refers": [
+      "tel:+15145550177"
+    ],
+    "transfer_outcomes": [
+      200
+    ],
+    "conversation_status": "transferred",
+    "tool_events": "transfer_to_human ok (second event = idempotent replay, one REFER)"
+  },
+  "blind_transfer race (LiveKit SIP v1.23.0)": {
+    "platform_transfer_attempt": {
+      "status": "no_answer",
+      "duration_s": 0.02,
+      "error": "SIP transfer failed: transaction failed to complete (0 intermediate responses)"
+    },
+    "transferee_notifies": [
+      "SIP/2.0 100 Trying",
+      "SIP/2.0 200 OK"
+    ],
+    "caller_heard_after_transfer": "hi this is sam at the front deck how can i help",
+    "conversation_status_after_60s": "in_progress (LiveKit never sent BYE)",
+    "livekit_sip_log_failed_run": [
+      "2026-11-04T07:31:37.587Z\tINFO\tsip\tsip/service.go:375\ttransferring SIP call\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_CwSGgtVUF7oU\", \"transferTo\": \"tel:+15145550177\"}",
+      "2026-11-04T07:31:37.589Z\tINFO\tsip\tsip/inbound.go:2784\thandling NOTIFY\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_CwSGgtVUF7oU\", \"fromIP\": \"127.0.0.1\", \"toIP\": \"127.0.0.1:5060\", \"sipTag\": \"72ae4622d9\", \"direction\": \"inbound\", \"transport\": \"udp\", \"traceID\": \"4",
+      "2026-11-04T07:31:37.590Z\tINFO\tsip\tsip/inbound.go:2065\tinbound call failed to transfer\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_CwSGgtVUF7oU\", \"fromIP\": \"127.0.0.1\", \"toIP\": \"127.0.0.1:5060\", \"sipTag\": \"72ae4622d9\", \"direction\": \"inbound\", \"transport\": \"udp",
+      "2026-11-04T07:31:38.592Z\tINFO\tsip\tsip/inbound.go:2784\thandling NOTIFY\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_CwSGgtVUF7oU\", \"fromIP\": \"127.0.0.1\", \"toIP\": \"127.0.0.1:5060\", \"sipTag\": \"72ae4622d9\", \"direction\": \"inbound\", \"transport\": \"udp\", \"traceID\": \"4"
+    ],
+    "livekit_sip_log_successful_run_for_comparison": [
+      "2026-11-04T07:30:28.073Z\tINFO\tsip\tsip/service.go:375\ttransferring SIP call\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_5QKXFC5BohZR\", \"transferTo\": \"tel:+15145550177\"}",
+      "2026-11-04T07:30:28.075Z\tINFO\tsip\tsip/inbound.go:2784\thandling NOTIFY\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_5QKXFC5BohZR\", \"fromIP\": \"127.0.0.1\", \"toIP\": \"127.0.0.1:5060\", \"sipTag\": \"9dcfc1611c\", \"direction\": \"inbound\", \"transport\": \"udp\", \"traceID\": \"3",
+      "2026-11-04T07:30:29.077Z\tINFO\tsip\tsip/inbound.go:2784\thandling NOTIFY\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_5QKXFC5BohZR\", \"fromIP\": \"127.0.0.1\", \"toIP\": \"127.0.0.1:5060\", \"sipTag\": \"9dcfc1611c\", \"direction\": \"inbound\", \"transport\": \"udp\", \"traceID\": \"3",
+      "2026-11-04T07:30:29.078Z\tINFO\tsip\tsip/inbound.go:2069\tinbound call transferred\t{\"nodeID\": \"NE_seTUTrH4SGJP\", \"callID\": \"SCL_5QKXFC5BohZR\", \"fromIP\": \"127.0.0.1\", \"toIP\": \"127.0.0.1:5060\", \"sipTag\": \"9dcfc1611c\", \"direction\": \"inbound\", \"transport\": \"udp\", \"tra"
+    ]
+  }
+}

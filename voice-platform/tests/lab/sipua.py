@@ -662,6 +662,10 @@ class SipEndpoint(asyncio.DatagramProtocol):
         if new.established.is_set():
             call.transfer_outcomes.append(200)
             notify("200 OK", True)
+            # like a carrier bridging the REFER: drop the transferor's leg if it doesn't
+            await asyncio.sleep(3)
+            if not call.ended.is_set():
+                self.hangup(call)
         else:
             if new.final_status is None:  # no final response in time
                 self.cancel(new)

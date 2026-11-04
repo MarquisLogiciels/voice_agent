@@ -25,7 +25,9 @@ from ..integrations.base import (
     LeadInput,
     LeadUpdate,
 )
+from ..knowledge.sanitize import neutralize_instructions
 from ..shared.crypto import stable_hash
+from ..shared.logging import get_logger
 from ..shared.phone import try_normalize_e164
 from .interfaces import ToolEnv
 from .scheduling import (
@@ -37,6 +39,8 @@ from .scheduling import (
     speakable_day,
     weekday_conflict,
 )
+
+logger = get_logger(__name__)
 
 
 class ToolRefusal(Exception):
@@ -520,15 +524,19 @@ async def search_knowledge_base(env: ToolEnv, a: SearchKnowledgeArgs) -> dict[st
         raise IntegrationError(ErrorKind.CONFIGURATION, "no knowledge base is configured")
     hits = await env.knowledge.search(a.query, top_k=env.config.knowledge.top_k)
     hits = [h for h in hits if h.score >= env.config.knowledge.min_score]
+    results = []
+    for h in hits:
+        excerpt, removed = neutralize_instructions(h.content[:1200])
+        results.append(
+            {"source": h.document_title, "excerpt": excerpt, "relevance": round(h.score, 3)}
+        )
+        if removed:
+            logger.warning(
+                "instruction-like text removed from a knowledge excerpt",
+                extra={"document": h.document_title, "sentences": removed},
+            )
     return {
-        "results": [
-            {
-                "source": h.document_title,
-                "excerpt": h.content[:1200],
-                "relevance": round(h.score, 3),
-            }
-            for h in hits
-        ],
+        "results": results,
         "guidance": "Answer only from these excerpts. If they do not contain the answer, say "
         "you don't know and offer to take a message or transfer.",
     }

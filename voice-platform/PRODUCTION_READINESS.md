@@ -33,7 +33,8 @@ Nothing is in the fifth category yet.
 | Blind transfer (REFER), busy → fallback, no answer, caller hang-up mid-transfer | **Tested against a real sandbox** | REFER/NOTIFY observed; 7/7 SIP scenarios pass |
 | Caller asks for a person → transfer (deterministic) | Tested against a real sandbox | `transfer_on_request` was dead config before (T1) |
 | Warm transfer (`WarmTransferTask`) | Implemented | **Not verified** |
-| Transfer announcement from an LLM-initiated tool call (F5) | Implemented | **Not verified** |
+| Transfer announcement from an LLM-initiated tool call (F5) | Tested against a real sandbox | announcement heard before the REFER (deterministic model) |
+| Transfer reported failed although the REFER succeeded (LiveKit SIP race, T6) | Unit tested | mitigation: check whether the caller left; lab re-run not possible |
 | Recording via egress + consent ordering | Unit tested | consent now plays before egress starts (F1); egress itself **not verified** |
 | DTMF / IVR detection | Implemented | **Not verified** |
 | Self-hosted providers: Vosk STT (flush, noise gate, ghost-word filter), Pico/eSpeak TTS | Tested against a real sandbox | audio harness; not production-quality voices |
@@ -44,8 +45,9 @@ Nothing is in the fifth category yet.
 | Business workflow with lost responses, retries, restart | Integration tested with mocks | real adapters + stateful vendor fakes + real Postgres ledger; HubSpot needs `idempotency_property` to avoid duplicates |
 | Booking race between concurrent calls (F2) | Unit tested | post-insert verification; residual risk if the calendar list is not read-after-write |
 | Knowledge ingestion + hybrid retrieval | Integration tested with mocks | extraction bounded (F4); semantic embeddings **not verified** |
-| Evaluation engine + scenario libraries | **Tested against a real sandbox** | real-model benchmark (Qwen 2.5 3B) — see below |
-| Optimizer + promotion gate | **Tested against a real sandbox** | real-model run — see below; human approval enforced by API |
+| Evaluation engine + scenario libraries (21 scenarios) | **Tested against a real sandbox** | Qwen 2.5 3B: 0.571 → 0.619 after platform fixes (CI 0.47–0.75); every booking flow fails with this model |
+| Optimizer + promotion gate | **Tested against a real sandbox** | 4 real-model candidates, all rejected by the gate — no improvement found; human approval enforced by API |
+| Prompt injection via documents | Tested against a real sandbox | instruction-like sentences neutralised in retrieved excerpts; injection scenario 0/2 → 3/3 |
 | Data-subject export/erasure incl. all recording versions, re-application after restore | Integration tested with mocks | moto (versioned S3) + Postgres; **restore drill not performed** |
 | PII out of logs (LiveKit `lk.pii.*`, phone numbers in room names) | Unit tested | lab logs showed caller numbers before the fix |
 | Admin dashboard | Integration tested with mocks | Playwright smoke test |
@@ -78,7 +80,7 @@ Capacity guidance and the DB-connection fan-out risk are in VALIDATION_REPORT §
 - [x] Credentials encrypted, write-only API, rotation; platform provider keys never sent to tenant-chosen endpoints
 - [x] SSRF protection for integrations, URL ingestion and OpenAI-compatible endpoints
 - [x] Tools: fixed schemas, confirmation for consequential actions, server-side checks, idempotency ledger, per-tool time budgets
-- [x] Prompt injection: platform rules after tenant text, tool output as data; benchmarked (`injection-caller`, `injection-in-document`)
+- [x] Prompt injection: platform rules after tenant text, tool output as data, instruction-like text removed from retrieved documents; benchmarked (`injection-caller`, `injection-in-document`)
 - [x] Bounded document extraction (process isolation, timeouts, zip-bomb limits)
 - [x] PII kept out of logs (incl. LiveKit's handlers); recordings purged with all versions; erasure re-applicable after restore
 - [x] Dependency (pip-audit), dependency-review and image (Trivy) scanning in CI; IaC scanning (checkov)

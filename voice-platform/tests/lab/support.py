@@ -37,13 +37,21 @@ def port_open(host: str, port: int) -> bool:
         return s.connect_ex((host, port)) == 0
 
 
+def _hostport(url: str) -> tuple[str, int]:
+    from urllib.parse import urlparse
+
+    u = urlparse(url)
+    return u.hostname or "127.0.0.1", u.port or (443 if u.scheme in ("https", "wss") else 80)
+
+
 def lab_available() -> list[str]:
     missing = []
-    for name, (h, p) in {
-        "livekit": ("127.0.0.1", 7880),
-        "ollama": ("127.0.0.1", 11434),
-        "vosk-en": ("127.0.0.1", 2700),
-    }.items():
+    targets = {
+        "livekit": _hostport(LIVEKIT_URL),
+        "ollama": _hostport(OLLAMA_URL),
+        "vosk-en": _hostport(VOSK_EN),
+    }
+    for name, (h, p) in targets.items():
         if not port_open(h, p):
             missing.append(name)
     if shutil.which("pico2wave") is None:

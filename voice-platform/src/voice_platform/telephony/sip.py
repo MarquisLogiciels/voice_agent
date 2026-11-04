@@ -163,6 +163,18 @@ class LiveKitTransport:
             sip_call_id=getattr(info, "sip_call_id", None),
         )
 
+    async def participant_present(self, *, room_name: str, identity: str) -> bool:
+        """Whether ``identity`` is still in the room (unknown errors count as present)."""
+        from livekit import api
+
+        try:
+            await self._api.room.get_participant(
+                api.RoomParticipantIdentity(room=room_name, identity=identity)
+            )
+            return True
+        except Exception as e:
+            return "not found" not in str(e).lower() and "not_found" not in str(e).lower()
+
     async def hangup(self, *, room_name: str) -> None:
         from livekit import api
 

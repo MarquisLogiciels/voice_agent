@@ -9,6 +9,7 @@ The manager never reports success unless the telephony operation succeeded:
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -24,6 +25,9 @@ from ..tools.scheduling import is_within_hours
 from .sip import SipCallError, TelephonyTransport, to_sip_uri
 
 logger = get_logger(__name__)
+
+# LiveKit SIP error when the REFER transaction ended without the response it expected
+_AMBIGUOUS_REFER = "transaction failed to complete"
 
 WarmRunner = Callable[[TransferDestination, str], Awaitable[None]]
 """Runs LiveKit's WarmTransferTask for a destination with the handoff summary; raises on
@@ -155,6 +159,17 @@ class TransferManager:
             attempts=attempts,
         )
 
+    async def _caller_left(self, wait_s: float = 6.0, interval_s: float = 0.5) -> bool:
+        present = getattr(self.transport, "participant_present", None)
+        if present is None or not self.caller_identity:
+            return False
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            if not await present(room_name=self.room_name, identity=self.caller_identity):
+                return True
+            await asyncio.sleep(interval_s)
+        return False
+
     async def _attempt(self, dest: TransferDestination, summary: str) -> tuple[str, str | None]:
         target = dest.phone_number or dest.sip_uri or ""
         if dest.phone_number:
@@ -185,6 +200,15 @@ class TransferManager:
                 )
             return "completed", None
         except SipCallError as e:
+            if _AMBIGUOUS_REFER in e.message and await self._caller_left():
+                # LiveKit SIP failed the API call because the transferee's NOTIFY overtook
+                # the 202 (lab, LiveKit SIP v1.23.0), yet the REFER went through: the caller is
+                # gone, so the transfer happened. Do not tell them nobody is available.
+                logger.warning(
+                    "transfer reported failed but the caller left: treating as completed",
+                    extra={"destination": dest.name},
+                )
+                return "completed", None
             logger.warning(
                 "transfer attempt failed",
                 extra={"destination": dest.name, "status": e.status, "sip_code": e.sip_code},

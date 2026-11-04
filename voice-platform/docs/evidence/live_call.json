@@ -1,43 +1,43 @@
 {
-  "room": "lab-44efa3f7",
+  "room": "lab-b830274e",
   "model": "qwen2.5-3b",
   "turns": [
     {
       "user": "What time do you open on Monday?",
-      "response_latency_s": 4.54,
+      "response_latency_s": 5.64,
       "agent_heard": "we open at nine am on monday is there anything else i can assist you with",
-      "agent_audio_s": 5.06
+      "agent_audio_s": 5.05
     },
     {
       "user": "Do you have any openings next Monday?",
-      "response_latency_s": 2.82,
-      "agent_heard": "i will check our schedule for next monday hold please",
-      "agent_audio_s": 3.74,
-      "agent_heard_after_hold": "next monday we have available slots at nine am nine thirty am ten am and ten thirty am is there anything else i can assist you with"
+      "response_latency_s": 3.43,
+      "agent_heard": "i don't think our schedule for next monday hold please",
+      "agent_audio_s": 3.72,
+      "agent_heard_after_hold": "next monday we have appointments available at nine am nine thirty am ten am and ten thirty am is there anything else i can assist you with"
     }
   ],
-  "dispatch_to_greeting_s": 1.22,
-  "greeting_heard": "hi thanks for calling maple dental how can i help you today",
-  "greeting_wer": 0.0,
+  "dispatch_to_greeting_s": 1.2,
+  "greeting_heard": "alright thanks for calling maple dental how can i help you today",
+  "greeting_wer": 0.08333333333333333,
   "interruption": {
-    "agent_spoke_before_barge_in_s": 1.04,
-    "agent_stopped_after_s": 0.69
+    "agent_spoke_before_barge_in_s": 1.06,
+    "agent_stopped_after_s": 0.66
   },
   "conversation": {
     "status": "completed",
     "end_reason": "participant_disconnected",
     "channel": "web",
-    "duration_s": 103.6,
+    "duration_s": 108.68,
     "environment": "staging"
   },
   "metrics": {
     "turns": 4,
     "usage": {
       "tts_chars": {
-        "tts:pico:-": 407
+        "tts:pico:-": 420
       },
       "stt_audio_s": {
-        "stt:vosk:vosk-en": 70.00000000000028
+        "stt:vosk:vosk-en": 75.30000000000035
       },
       "llm_input_tokens": {
         "llm:openai-compatible:qwen2.5-3b": 4484
@@ -49,43 +49,43 @@
     "errors": 0,
     "latency": {
       "e2e": {
-        "max": 5.9156,
-        "p50": 3.3818,
-        "p90": 5.4088,
-        "p95": 5.6622,
-        "mean": 3.6641,
+        "max": 5.8547,
+        "p50": 3.7695,
+        "p90": 5.4377,
+        "p95": 5.6462,
+        "mean": 3.7951,
         "count": 3
       },
       "eou": {
-        "max": 1.1949,
-        "p50": 1.1499,
-        "p90": 1.1941,
-        "p95": 1.1945,
-        "mean": 1.1151,
+        "max": 1.258,
+        "p50": 1.1518,
+        "p90": 1.2312,
+        "p95": 1.2446,
+        "mean": 1.1175,
         "count": 4
       },
       "stt": {
-        "max": 1.1941,
-        "p50": 1.1489,
-        "p90": 1.1932,
-        "p95": 1.1936,
-        "mean": 1.1141,
+        "max": 1.2573,
+        "p50": 1.151,
+        "p90": 1.2305,
+        "p95": 1.2439,
+        "mean": 1.1166,
         "count": 4
       },
       "llm_ttft": {
-        "max": 4.6719,
-        "p50": 2.6462,
-        "p90": 4.1823,
-        "p95": 4.4271,
-        "mean": 2.611,
+        "max": 4.5392,
+        "p50": 3.022,
+        "p90": 4.217,
+        "p95": 4.3781,
+        "mean": 2.7949,
         "count": 4
       },
       "tts_ttfb": {
-        "max": 0.0488,
-        "p50": 0.0304,
-        "p90": 0.0477,
-        "p95": 0.0482,
-        "mean": 0.034,
+        "max": 0.0633,
+        "p50": 0.0384,
+        "p90": 0.0609,
+        "p95": 0.0621,
+        "mean": 0.0422,
         "count": 5
       }
     },
@@ -122,7 +122,7 @@
     },
     {
       "role": "assistant",
-      "text": "Next Monday, we have available slots at 9 AM, 9:30 AM, 10 AM, and 10:30 AM. Is there anything else I can assist you with?",
+      "text": "Next Monday, we have appointments available at 9 AM, 9:30 AM, 10 AM, and 10:30 AM. Is there anything else I can assist you with?",
       "interrupted": false
     },
     {
@@ -154,25 +154,25 @@
   ],
   "latency_events": [
     {
-      "ts": 1793767603.9419878,
-      "e2e": 3.3818449131367743,
-      "eou": 1.1074492931365967,
-      "llm_ttft": 2.2526060130003316,
-      "tts_ttfb": 0.021789606999846
+      "ts": 1793777289.7548141,
+      "e2e": 3.769456769359749,
+      "eou": 1.1685123443603516,
+      "llm_ttft": 2.5789432729998225,
+      "tts_ttfb": 0.022001151999575086
     },
     {
-      "ts": 1793767618.7381704,
-      "e2e": 1.6949004029775097,
-      "eou": 1.1922657489776611,
-      "llm_ttft": 0.47980548099985754,
-      "tts_ttfb": 0.022829172999990988
+      "ts": 1793777304.8095753,
+      "e2e": 1.7611910389914556,
+      "eou": 1.1350657939910889,
+      "llm_ttft": 0.596206637999785,
+      "tts_ttfb": 0.029918607000581687
     },
     {
-      "ts": 1793767664.6349692,
-      "e2e": 5.915590162048829,
-      "eou": 1.1948614120483398,
-      "llm_ttft": 4.671937070999775,
-      "tts_ttfb": 0.048791679000714794
+      "ts": 1793777354.1493154,
+      "e2e": 5.854744135787769,
+      "eou": 1.2580459117889404,
+      "llm_ttft": 4.539224689999173,
+      "tts_ttfb": 0.057473533999655047
     }
   ],
   "event_types": {
@@ -185,10 +185,10 @@
   },
   "follow_through": [
     {
-      "ts": 1793767618.738217,
+      "ts": 1793777304.8096247,
       "reply": "I'll check our schedule for next Monday. Hold please."
     }
   ],
-  "recorded_at": "2026-11-04T04:48:07.473036+00:00",
+  "recorded_at": "2026-11-04T07:29:36.938972+00:00",
   "worker_log_errors": []
 }

@@ -10,6 +10,7 @@ from livekit.agents import Agent, ModelSettings, RunContext, function_tool
 from livekit.agents.llm import ChatContext, ChatMessage
 
 from ..config.schema import AgentConfig
+from ..knowledge.sanitize import neutralize_instructions
 from ..knowledge.types import KnowledgeSearch
 from ..shared.logging import get_logger
 from ..tools.executor import ToolExecutor
@@ -201,7 +202,8 @@ class PlatformAgent(Agent):
                     hits = [h for h in hits if h.score >= kcfg.min_score]
                     if hits:
                         excerpts = "\n".join(
-                            f"[{h.document_title}] {h.content[:800]}" for h in hits
+                            f"[{h.document_title}] {neutralize_instructions(h.content[:800])[0]}"
+                            for h in hits
                         )
                         turn_ctx.add_message(
                             role="assistant",
