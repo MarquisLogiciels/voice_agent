@@ -250,6 +250,47 @@ async def create_scenario(
     return {"id": str(row.id), "slug": row.slug, "name": row.name, "tags": row.tags}
 
 
+class GenerateIn(BaseModel):
+    version_id: uuid.UUID
+    count: int = Field(default=5, ge=1, le=20)
+    focus: list[str] = Field(default_factory=list, max_length=10)
+
+
+@router.post("/scenarios/generate", status_code=201)
+async def generate(
+    body: GenerateIn, ctx: TenantCtx = Depends(tenant_ctx(P.EVALUATIONS_RUN))
+) -> dict[str, Any]:
+    """Draft scenarios with the simulator LLM; stored with source=generated for review."""
+    from ...config.service import parse_config
+    from ...evaluation.generation import generate_scenarios
+    from ...providers.types import BuildContext, ProviderKind
+    from ..jobs.runner import parse_llm_spec
+
+    v = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).get_version(body.version_id)
+    cfg = parse_config(v.config)
+    llm = getattr(ctx.services, "scenario_llm", None) or ctx.services.registry.create(
+        ProviderKind.LLM, parse_llm_spec(ctx.services.settings.simulator_llm), BuildContext()
+    )
+    scenarios, rejected = await generate_scenarios(
+        llm, cfg, count=body.count, focus=body.focus or None
+    )
+    saved = []
+    for sc in scenarios:
+        row = await ctx.session.scalar(
+            sa.select(EvalScenario).where(
+                EvalScenario.tenant_id == ctx.tenant_id, EvalScenario.slug == sc.id
+            )
+        )
+        if row is None:
+            row = EvalScenario(tenant_id=ctx.tenant_id, slug=sc.id)
+            ctx.session.add(row)
+        row.name, row.tags, row.agent_id = sc.name, sc.tags, v.agent_id
+        row.spec, row.source = sc.model_dump(mode="json"), "generated"
+        saved.append(sc.id)
+    await ctx.session.flush()
+    return {"created": saved, "rejected": rejected}
+
+
 @router.get("/scenarios")
 async def list_scenarios(
     ctx: TenantCtx = Depends(tenant_ctx(P.EVALUATIONS_READ)),

@@ -396,3 +396,84 @@ async def test_health_and_metrics(api: Any) -> None:
     ready = await api.get("/readyz")
     assert ready.status_code == 200 and ready.json()["checks"]["database"] is True
     assert "vp_api_requests_total" in (await api.get("/metrics")).text
+
+
+async def test_scenario_generation_and_data_subject_requests(api: Any, db: Any) -> None:
+    import json as _json
+
+    from voice_platform.core.models import Conversation, ConversationEvent
+    from voice_platform.evaluation.scripted import Reply, Rule, ScriptedLLM
+
+    admin = await _admin_token(api, db)
+    tid, owner = await _tenant_with_owner(api, admin)
+    base = f"/v1/tenants/{tid}"
+    agent = (
+        await api.post(
+            f"{base}/agents",
+            headers=H(owner),
+            json={
+                "slug": "gen",
+                "name": "Gen",
+                "config": sample_config(
+                    tools={"enabled": ["lookup_customer"]}, integrations={"crm": "sandbox"}
+                ),
+            },
+        )
+    ).json()
+    generated = {
+        "scenarios": [
+            {
+                "id": "Angry Caller",
+                "name": "Angry caller",
+                "persona": {"mood": "angry"},
+                "script": [{"say": "This is ridiculous, let me talk to someone!"}],
+                "expectations": {"tools": [{"name": "lookup_customer"}]},
+                "sandbox": {"faults": {"x": {"error": "auth"}}},
+            },  # must be stripped
+            {
+                "id": "bad",
+                "name": "Uses disabled tool",
+                "script": [{"say": "hi"}],
+                "expectations": {"tools": [{"name": "book_appointment"}]},
+            },  # rejected
+            {"id": "no-driver", "name": "Invalid"},  # rejected
+        ]
+    }
+    api.services.scenario_llm = ScriptedLLM([Rule(lambda t: Reply(text=_json.dumps(generated)))])
+    r = (
+        await api.post(
+            f"{base}/scenarios/generate",
+            headers=H(owner),
+            json={"version_id": agent["draft"]["id"], "count": 3},
+        )
+    ).json()
+    assert r["created"] == ["gen-angry-caller"] and len(r["rejected"]) == 2
+    listed = (await api.get(f"{base}/scenarios", headers=H(owner))).json()
+    assert any(s["slug"] == "gen-angry-caller" and s["source"] == "generated" for s in listed)
+
+    conv_id = uuid.uuid4()
+    async with db.session(DbScope.for_tenant(uuid.UUID(tid))) as s:
+        s.add(Conversation(id=conv_id, tenant_id=uuid.UUID(tid), caller_number="+15145550142"))
+        await s.flush()
+        s.add(
+            ConversationEvent(
+                tenant_id=uuid.UUID(tid),
+                conversation_id=conv_id,
+                seq=1,
+                type="transcript",
+                payload={"role": "user", "text": "hi"},
+            )
+        )
+    export = (
+        await api.get(f"{base}/data-subjects/export?phone=5145550142", headers=H(owner))
+    ).json()
+    assert len(export["conversations"]) == 1
+    assert export["conversations"][0]["events"][0]["text"] == "hi"
+    erased = (
+        await api.delete(f"{base}/data-subjects?phone=%2B15145550142", headers=H(owner))
+    ).json()
+    assert erased["conversations_deleted"] == 1
+    again = (
+        await api.get(f"{base}/data-subjects/export?phone=5145550142", headers=H(owner))
+    ).json()
+    assert again["conversations"] == []

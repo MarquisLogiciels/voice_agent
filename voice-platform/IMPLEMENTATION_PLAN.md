@@ -84,15 +84,17 @@ working session.
 - [x] Deterministic evaluators + independent LLM judge; seeded runner with Wilson CIs
 - [x] Optimizer: allowlisted patches, heuristic + LLM proposers, regression-rejecting gate,
       candidate versions, human approval → canary
-- [ ] Benchmark with real models (needs keys); LLM scenario generation endpoint
+- [x] LLM scenario generation endpoint (validated, sandbox-forced, tagged `generated`)
+- [ ] Benchmark with real models (needs keys)
 
 **Management**
 - [x] REST API for all resources; admin dashboard (Playwright smoke test)
+- [x] Data-subject export and erasure by phone number
 
 **Hardening**
 - [x] Prometheus metrics, OTel tracing (PII-stripped), Grafana dashboard, alert rules
 - [x] Dockerfile, compose stack, AWS Terraform, GitHub Actions workflow
-- [x] ruff, mypy --strict, import-linter contracts all clean; 114 tests
+- [x] ruff, mypy --strict, import-linter contracts all clean; 115 tests
 - [x] Load measurements recorded (platform overhead; API throughput)
 - [ ] Docker build / compose up / terraform validate / CI run (unavailable in this environment)
 
@@ -101,5 +103,5 @@ working session.
    checklist in PRODUCTION_READINESS.md; fix whatever live calls reveal.
 2. Run the receptionist suite against real models with ≥3 repetitions; tune the library.
 3. Build the audio simulation harness (custom `AudioInput`/`AudioOutput` around AgentSession).
-4. Add LLM-based scenario generation (`POST /scenarios/generate`) with human review.
-5. Per-person data subject access/deletion endpoints; SSO/MFA; pip-audit in CI.
+4. Review workflow for generated scenarios (approve before they gate promotion).
+5. SSO/MFA; pip-audit in CI; KMS-backed vault keys.

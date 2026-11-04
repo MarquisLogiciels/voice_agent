@@ -711,6 +711,104 @@ async def recording_url(
     return {"url": url, "expires_in_s": 300}
 
 
+# --- data subject requests (access / erasure by phone number) ---------------------------------
+@router.get("/data-subjects/export")
+async def export_subject(
+    phone: str, ctx: TenantCtx = Depends(tenant_ctx(P.RECORDINGS_READ))
+) -> dict[str, Any]:
+    """Everything stored about a caller (by phone) in this tenant: access requests."""
+    e164 = normalize_e164(phone)
+    convs = (
+        await ctx.session.scalars(
+            sa.select(Conversation).where(
+                Conversation.tenant_id == ctx.tenant_id,
+                sa.or_(Conversation.caller_number == e164, Conversation.callee_number == e164),
+            )
+        )
+    ).all()
+    out = []
+    for c in convs:
+        events = (
+            await ctx.session.scalars(
+                sa.select(ConversationEvent)
+                .where(ConversationEvent.conversation_id == c.id)
+                .order_by(ConversationEvent.seq)
+            )
+        ).all()
+        tools = (
+            await ctx.session.scalars(
+                sa.select(ToolExecution).where(ToolExecution.conversation_id == c.id)
+            )
+        ).all()
+        out.append(
+            {
+                **_conv(c),
+                "events": [{"type": e.type, **e.payload} for e in events],
+                "tool_executions": [
+                    {"tool": t.tool_name, "request": t.request, "response": t.response}
+                    for t in tools
+                ],
+            }
+        )
+    await record_audit(
+        ctx.session,
+        tenant_id=ctx.tenant_id,
+        actor=ctx.principal,
+        action="data_subject.export",
+        resource_type="data_subject",
+        resource_id=e164[-4:],
+        details={"conversations": len(out)},
+    )
+    return {
+        "phone": e164,
+        "conversations": out,
+        "note": "CRM/calendar records live in the tenant's own systems and are not included.",
+    }
+
+
+@router.delete("/data-subjects")
+async def erase_subject(
+    phone: str, ctx: TenantCtx = Depends(tenant_ctx(P.TENANT_UPDATE))
+) -> dict[str, Any]:
+    """Erase a caller's conversations, transcripts, tool payloads and recordings."""
+    e164 = normalize_e164(phone)
+    convs = (
+        await ctx.session.scalars(
+            sa.select(Conversation).where(
+                Conversation.tenant_id == ctx.tenant_id,
+                sa.or_(Conversation.caller_number == e164, Conversation.callee_number == e164),
+            )
+        )
+    ).all()
+    ids = [c.id for c in convs]
+    recordings = 0
+    for c in convs:
+        if c.recording_uri:
+            await ctx.services.blobs.delete(c.recording_uri)
+            recordings += 1
+    if ids:
+        await ctx.session.execute(
+            sa.update(ToolExecution)
+            .where(ToolExecution.conversation_id.in_(ids))
+            .values(request={}, response={})
+        )
+        await ctx.session.execute(sa.delete(Conversation).where(Conversation.id.in_(ids)))
+    await record_audit(
+        ctx.session,
+        tenant_id=ctx.tenant_id,
+        actor=ctx.principal,
+        action="data_subject.erase",
+        resource_type="data_subject",
+        resource_id=e164[-4:],
+        details={"conversations": len(ids), "recordings": recordings},
+    )
+    return {
+        "conversations_deleted": len(ids),
+        "recordings_deleted": recordings,
+        "note": "Also process the request in connected CRM/calendar systems.",
+    }
+
+
 # --- analytics --------------------------------------------------------------------------------
 @router.get("/analytics/overview")
 async def analytics(
