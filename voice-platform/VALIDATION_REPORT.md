@@ -254,3 +254,105 @@ CPU spikes), keep inference servers off worker hosts, and run a real concurrent-
 `vp_response_latency_seconds` p95, job RSS and DB connections) before choosing the number.
 **Not measured here:** concurrent calls on one worker (this 4-vCPU box is saturated by the
 local LLM alone, so any number would describe Ollama, not the platform).
+
+### 3.10 Audio-level simulation — **Tested against a real sandbox** (synthetic callers)
+
+`uv run pytest tests/lab/test_audio_harness.py --run-lab` drives the platform's own Vosk
+provider (`VoskSTT.stream()`: noise gate, silence dropping, manual flush, ghost-word filter)
+and Silero VAD through LiveKit's stream interfaces. Callers are synthesized (SVOX Pico,
+eSpeak NG); conditions are applied with deterministic seeds. Evidence:
+`docs/evidence/audio_harness.json` (every reference/hypothesis pair).
+
+| Condition | WER | Utterances |
+|---|---|---|
+| en/pico | 0.9 % | 10 |
+| en/pico x0.8 (slower) | 3.1 % | 10 |
+| en/pico x1.3 (faster) | 6.1 % | 10 |
+| en/pico SNR 20 dB | 3.2 % | 10 |
+| en/pico SNR 10 dB | 16.8 % | 10 |
+| en/pico SNR 5 dB | 80.0 % | 10 |
+| en/pico telephone (8 kHz G.711) | 18.1 % | 10 |
+| en/espeak en-us | 24.1 % | 10 |
+| en/espeak Scottish | 43.9 % | 10 |
+| en/espeak Caribbean | 39.6 % | 10 |
+| fr/pico | 0.0 % | 8 |
+| fr/pico SNR 10 dB | 9.4 % | 8 |
+| fr/pico telephone | 4.2 % | 8 |
+| fr/espeak fr-FR | 26.5 % | 8 |
+| fr/espeak fr-BE | 31.2 % | 8 |
+
+* Turn boundaries (Silero, LiveKit defaults, clean + 10 dB): speech start detected p50 0.09 s
+  after true onset; end of speech p50 0.69 s / max 0.78 s after true end (includes the
+  min-silence window); no utterance missed.
+* Flush → final transcript in real time: p50 0.49 s, max 1.37 s.
+* False triggers on 10 s of non-speech: without gate/filter Vosk returns "the" for silence,
+  −50 dBFS and −35 dBFS noise; with the platform defaults it returns nothing in all three
+  (VAD reported no speech in any of them). The gate alone fixes silence but not steady noise —
+  hence the lone-word filter.
+
+Findings: (1) the wideband English Vosk model loses ~17 points of WER on 8 kHz phone audio
+(band-limited resampling did not change this) while the French model barely degrades — for
+phone lines use a telephony/narrowband model or a commercial STT; (2) synthetic voices are an
+easy case: eSpeak's robotic voices already cost 24–44 %, real accents and phone lines will be
+worse; (3) **no Québec French voice was available offline** — French was tested with Québec
+vocabulary spoken by European voices, so Québec accents are **Not verified**.
+
+### 3.11 Privacy, logging and erasure — fixes found by inspecting real artefacts
+
+* Lab worker logs contained the caller's phone number (`lk.pii.participant_identity`, and in
+  every line via LiveKit's room name `call-_+15145550199_…`). LiveKit tags transcripts, tool
+  arguments, chat context and DTMF as `lk.pii.*`. Fix: redaction filter attached to *all*
+  root handlers, including LiveKit's in the worker main process (which re-emits job-process
+  records with `callHandlers`, bypassing logger filters); `lk.pii.*` dropped unless
+  `VP_LOG_PII` (refused in staging/prod); E.164 numbers masked in every string. **Unit tested.**
+* Erasure on the versioned S3 bucket only added a delete marker (recordings recoverable for
+  30 days). Now every version and marker is deleted; IAM grants `DeleteObjectVersion` /
+  `ListBucketVersions` on the tenant prefix. **Integration tested with mocks** (moto, versioned
+  bucket: two versions survive `delete`, none survive `purge`).
+* S3 uploads forced `ServerSideEncryption=AES256`, overriding the bucket's KMS CMK default.
+  Removed.
+* Backups: erased subjects are recorded as keyed hashes; `vp reapply-erasures` re-erases them
+  after a restore. **Integration tested** (erase → simulated restore → reapply → gone); a real
+  RDS restore drill is **Not verified**.
+
+### 3.12 Infrastructure validation
+
+* Terraform 1.17.1 + AWS provider 5.100.0 (from releases.hashicorp.com, SHA256-verified, via a
+  filesystem mirror because the registry is blocked): `fmt -check` and `validate` **pass**.
+  Checkov 3.4.3: 120 passed / 27 failed initially → fixes (SG descriptions, ALB egress limited
+  to the API tasks, RDS log export + minor upgrades + PI CMK, Redis CMK, abort incomplete
+  uploads, prod deletion protection) and justified inline skips → **132 passed, 4 known gaps**
+  (S3 access logging, explicit KMS key policy, secret rotation, AZ pinning). CI enforces this.
+  `plan`/`apply`: **Not verified** (no AWS account).
+* Compose: `docker compose config` valid for the app and lab stacks; the lab stack ran for the
+  whole session. Worker/jobs containers no longer inherit the API health check; the worker's
+  check uses LiveKit's `:8081` health server (503 until registered).
+* Graceful shutdown: the worker drains calls for up to 30 min on SIGTERM, but Fargate kills a
+  container 120 s after SIGTERM, so every deployment would have cut calls longer than 2 min.
+  The worker now enables ECS task scale-in protection while it has active jobs
+  (`apps/worker/ecs_protection.py`, unit tested against a fake ECS agent endpoint; **Not
+  verified** on ECS).
+* Docker image build: **not performed** — the Docker daemon in this sandbox stopped at its
+  2-hour limit and could not be restarted; the lab containers kept running without it (port
+  forwarding and log draining done manually). CI builds and Trivy-scans the image.
+* F6 (turn detector): LiveKit registers the turn-detector inference runner only when the plugin
+  is imported in the worker's main process; the platform imported it lazily in job processes,
+  so model turn detection (the sample default) could not work and `download-files` fetched no
+  model. Fixed (`register_main_process_plugins`), with VAD fallback when disabled.
+  **Unit tested**; with the real model files **Not verified** (Hugging Face blocked).
+
+### 3.13 Upstream LiveKit issues observed (for `lk docs submit-feedback`; CLI not installable here)
+
+1. `AgentServer` uses `HTTPS_PROXY`/`HTTP_PROXY` for its server connection and ignores
+   `NO_PROXY`; a self-hosted LiveKit on an internal address becomes unreachable behind an egress
+   proxy (HTTP 405 from the proxy). Workaround in `apps/worker/main.py::worker_http_proxy`.
+2. The turn-detector plugin must be imported in the worker's main process for its inference
+   runner (and `download-files`) — easy to miss when providers are constructed lazily; the
+   failure only appears at runtime.
+3. The SIP individual dispatch rule names rooms `<prefix>_<caller number>_<random>`, so the
+   caller's phone number is in every job log line (`room`) and in room listings; an option to
+   omit the number would help data minimisation.
+4. LiveKit's CPU-based default `load_fnc` measures the whole host; co-located inference makes
+   the worker flap between available/full (six times per call in the lab).
+5. `TransferSIPParticipant` returns "request timed out" at its ringing timeout while the
+   transferee may still be ringing the target; documenting this race would help.

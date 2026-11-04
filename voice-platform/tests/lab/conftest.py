@@ -66,7 +66,9 @@ def worker(
         "VP_LOG_LEVEL": os.environ.get("VP_LAB_LOG_LEVEL", "INFO"),
         "VP_AGENT_DISPATCH_NAME": agent_name,
         "VP_WORKER_METRICS_PORT": str(_free_port()),
-        "VP_TRUSTED_PROVIDER_ENDPOINTS": f'["{OLLAMA_URL}", "{VOSK_EN}", "{VOSK_FR}"]',
+        "VP_TRUSTED_PROVIDER_ENDPOINTS": (
+            f'["{OLLAMA_URL}", "{VOSK_EN}", "{VOSK_FR}", "http://127.0.0.1:11600/v1"]'
+        ),
         "VP_TELEPHONY_DRY_RUN": "false",
         # turn-detector model files need Hugging Face (blocked here); lab agents use VAD
         "VP_WORKER_TURN_DETECTOR": "false",

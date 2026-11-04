@@ -282,6 +282,14 @@ async def _transfer_call(
         out["asked_at"] = asked
         await wait_for(lambda: call.refer_to is not None or call.ended.is_set(), 60)
         out["refer_to"] = call.refer_to
+        refer_t = next(
+            (t["t"] for t in pstn.trace if t["method"] == "REFER" and t["call_id"] == call.call_id),
+            None,
+        )
+        if refer_t is not None:  # what the caller heard between asking and the REFER
+            out["heard_before_refer"] = await vosk_transcribe(
+                call.rtp.recording(out["asked_at"], refer_t)
+            )
         if hang_up_after_refer and call.refer_to:
             await wait_for(lambda: call.transfer_call is not None, 10)
             await asyncio.sleep(1.0)
@@ -422,6 +430,42 @@ async def test_caller_hangs_up_during_transfer(
     assert conv["status"] in ("completed", "transferred") and conv["duration_s"], data
     rooms = (await lk.room.list_rooms(__import__("livekit").api.ListRoomsRequest())).rooms
     assert not [r for r in rooms if CALLER in r.name and r.num_participants > 1], rooms
+
+
+async def test_llm_initiated_transfer_plays_announcement_before_refer(
+    db: Any, lk: Any, worker: dict[str, Any], phones: dict[str, SipEndpoint],
+    speech: dict[str, np.ndarray], outbound_trunk: str, evidence_dir: Path,
+) -> None:  # fmt: skip
+    """Audit F5: the transfer tool speaks the announcement (session.say + wait for playout)
+    from *inside* a tool call the model made. Uses a deterministic OpenAI-compatible model so
+    the model path is exercised (the caller-asks-for-a-person hatch is switched off)."""
+    from tests.lab.fake_llm import FakeLLM
+
+    fake = FakeLLM()
+    url = await fake.start(11600)
+    try:
+        cfg = transfer_config(
+            [{"name": "front_desk", "phone_number": OFFICE_ANSWER, "ringing_timeout_s": 15}],
+            "front_desk",
+        )
+        cfg["transfer"]["transfer_on_request"] = False
+        cfg["conversation"]["prewarm_llm_prompt"] = False
+        cfg["pipeline"]["llm"] = {
+            "provider": "openai-compatible",
+            "model": "lab-scripted",
+            "options": {"base_url": url},
+            "connection": {"timeout_s": 30, "max_retries": 0},
+        }
+        out = await _transfer_call(db, lk, worker, phones, speech, outbound_trunk, cfg)
+    finally:
+        await fake.stop()
+    data = _summary(out)
+    data["llm_requests"] = len(fake.requests)
+    evidence(evidence_dir, "llm_initiated_transfer", data)
+    assert any(e["tool"] == "transfer_to_human" and e["ok"] for e in data["tool_events"]), data
+    heard = out.get("heard_before_refer", "")
+    assert "transfer" in heard or "hold" in heard, data  # announcement played before REFER
+    assert data["conversation"]["status"] == "transferred", data
 
 
 # ------------------------------------------------------------------------------------------
