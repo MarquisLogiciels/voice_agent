@@ -15,6 +15,7 @@ from livekit.agents import AgentServer, JobContext, JobProcess, cli
 from ...shared.logging import configure_logging, get_logger, install_redaction
 from ...shared.settings import get_settings
 from ..services import Services
+from .ecs_protection import TaskProtection
 
 logger = get_logger(__name__)
 _services: Services | None = None
@@ -81,7 +82,13 @@ def build_server() -> AgentServer:
 
     # LiveKit's CLI installs its own log handler in the main process, which also re-emits every
     # job-process record; redact there too (transcripts, phone numbers in room names).
-    server.on("worker_started", lambda: install_redaction(log_pii=settings.log_pii))
+    protection = TaskProtection(lambda: len(server.active_jobs))
+
+    def _started() -> None:
+        install_redaction(log_pii=settings.log_pii)
+        protection.start()  # no-op outside ECS
+
+    server.on("worker_started", _started)
     # The entrypoint must be importable by qualified name: in production LiveKit runs each
     # job in a separate process (forkserver) and pickles the function reference.
     server.rtc_session(agent_name=settings.agent_dispatch_name)(entrypoint)

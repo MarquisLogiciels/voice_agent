@@ -305,6 +305,8 @@ resource "aws_iam_role_policy" "task_s3" {
       { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion"], Resource = ["${aws_s3_bucket.data.arn}/tenants/*"] },
       { Effect = "Allow", Action = ["s3:ListBucketVersions"], Resource = [aws_s3_bucket.data.arn], Condition = { StringLike = { "s3:prefix" = ["tenants/*"] } } },
       { Effect = "Allow", Action = ["kms:GenerateDataKey", "kms:Decrypt"], Resource = [aws_kms_key.data.arn] },
+      # workers protect their own task from deployment/scale-in while calls are active
+      { Effect = "Allow", Action = ["ecs:UpdateTaskProtection", "ecs:GetTaskProtection"], Resource = ["arn:aws:ecs:${var.region}:${data.aws_caller_identity.me.account_id}:task/${aws_ecs_cluster.main.name}/*"] },
     ]
   })
 }
@@ -348,6 +350,14 @@ resource "aws_ecs_task_definition" "svc" {
     secrets      = local.secrets
     stopTimeout  = each.key == "worker" ? 120 : 30
     portMappings = each.value.port == null ? [] : [{ containerPort = each.value.port }]
+    # the worker's LiveKit health server (503 until registered / while disconnected)
+    healthCheck = each.key == "worker" ? {
+      command     = ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/').status==200 else 1)\""]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    } : null
     logConfiguration = {
       logDriver = "awslogs"
       options = {

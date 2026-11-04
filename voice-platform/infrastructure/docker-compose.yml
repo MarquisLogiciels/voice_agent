@@ -65,10 +65,17 @@ services:
     ports: ["9464:9464"]
     depends_on: {migrate: {condition: service_completed_successfully}, livekit: {condition: service_started}}
     deploy: {resources: {limits: {cpus: "2", memory: 3g}}}
-    stop_grace_period: 60s
+    # the image HEALTHCHECK probes the API; the worker's health server is LiveKit's on :8081
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/').status==200 else 1)"]
+      interval: 15s
+      start_period: 60s
+    # calls are drained on SIGTERM (drain_timeout 1800 s); give them time to finish
+    stop_grace_period: 30m
   jobs:
     <<: *app
     command: ["vp", "jobs"]
+    healthcheck: {disable: true}
     depends_on: {migrate: {condition: service_completed_successfully}}
     stop_grace_period: 120s
   otel-collector:
