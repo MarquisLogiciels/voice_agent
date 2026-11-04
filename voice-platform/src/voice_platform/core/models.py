@@ -435,7 +435,10 @@ class KnowledgeChunk(Base):
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
     tsv: Mapped[Any] = mapped_column(
         TSVECTOR,
-        sa.Computed("to_tsvector('simple', content)", persisted=True),
+        sa.Computed(
+            "to_tsvector('simple', vp_unaccent(content)) || "
+            "to_tsvector('english', vp_unaccent(content)) || "
+            "to_tsvector('french', vp_unaccent(content))", persisted=True),
     )
     meta: Mapped[dict[str, Any]] = _jsonb()
     created_at: Mapped[datetime] = _created()
