@@ -31,6 +31,53 @@ def _lang_name(code: str) -> str:
     return name
 
 
+_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_DAY_NAMES = {
+    "en": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+    "fr": ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"),
+}
+
+
+def _spoken_time(hhmm: str, lang: str) -> str:
+    h, m = (int(x) for x in hhmm.split(":"))
+    if lang == "fr":
+        return f"{h} h {m:02d}" if m else f"{h} h"
+    suffix = "AM" if h < 12 or h == 24 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12}:{m:02d} {suffix}" if m else f"{h12} {suffix}"
+
+
+def speakable_hours(schedule: dict[str, list[str]], language: str = "en") -> str:
+    """Opening hours as a speakable sentence, in weekday order, consecutive days grouped.
+
+    Lab finding: with the raw 'mon: 09:00-17:00' form (and JSONB's alphabetical key order) a
+    small model read the schedule back verbatim and the TTS spoke "nine minus seventeen".
+    """
+    lang = "fr" if language.startswith("fr") else "en"
+    names = _DAY_NAMES[lang]
+    to, closed, sep = (" à ", "fermé", " ; ") if lang == "fr" else (" to ", "closed", "; ")
+    spans: list[tuple[int, int, str]] = []
+    for i, day in enumerate(_DAYS):
+        ranges = schedule.get(day) or []
+        text = (
+            ", ".join(
+                f"{_spoken_time(a, lang)}{to}{_spoken_time(b, lang)}"
+                for a, b in (r.split("-") for r in ranges)
+            )
+            if ranges
+            else closed
+        )
+        if spans and spans[-1][2] == text:
+            spans[-1] = (spans[-1][0], i, text)
+        else:
+            spans.append((i, i, text))
+    parts = []
+    for first, last, text in spans:
+        days = names[first] if first == last else f"{names[first]}{to}{names[last]}"
+        parts.append(f"{days}: {text}")
+    return sep.join(parts)
+
+
 def build_instructions(
     cfg: AgentConfig, *, now: datetime, caller_number: str | None, caller_context: str | None = None
 ) -> str:
@@ -67,8 +114,7 @@ def build_instructions(
     if b.phone:
         facts.append(f"Main phone: {b.phone}")
     if b.hours.schedule:
-        hours = "; ".join(f"{d}: {', '.join(r) or 'closed'}" for d, r in b.hours.schedule.items())
-        facts.append(f"Opening hours: {hours}")
+        facts.append(f"Opening hours: {speakable_hours(b.hours.schedule, cfg.language)}")
     for k, v in b.facts.items():
         facts.append(f"{k}: {v}")
     if caller_number:

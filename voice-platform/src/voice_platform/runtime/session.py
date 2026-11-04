@@ -215,7 +215,8 @@ def build_runtime_session(
             if guard is not None:
                 guard.user_turn()
         elif item.role == "assistant" and guard is not None:
-            guard.agent_reply(item.text_content or "", interrupted=bool(item.interrupted))
+            fired = guard.agent_reply(item.text_content or "", interrupted=bool(item.interrupted))
+            logger.debug("agent reply committed", extra={"follow_through": fired})
 
     session.on("conversation_item_added", _on_item)
     recorder.add(

@@ -180,14 +180,42 @@ async def test_vosk_manual_flush_finalizes_and_reconnects() -> None:
     await runner.cleanup()
 
 
-def test_vosk_noise_gate_zeroes_near_silence_only() -> None:
+def test_vosk_noise_gate_detects_near_silence_only() -> None:
     import numpy as np
 
-    from voice_platform.providers.local import _gate
+    from voice_platform.providers.local import _is_quiet
 
     threshold = 32768 * 10 ** (-60 / 20)
     faint = np.random.default_rng(0).normal(0, 3, 1600).astype(np.int16).tobytes()
     speech = (np.sin(np.arange(1600) / 5) * 3000).astype(np.int16).tobytes()
-    assert _gate(faint, threshold) == bytes(len(faint))  # vosk would hear "the"
-    assert _gate(speech, threshold) == speech
-    assert _gate(faint, None) == faint  # gate disabled
+    assert _is_quiet(faint, threshold)  # vosk would hear "the"
+    assert not _is_quiet(speech, threshold)
+    assert not _is_quiet(faint, None)  # gate disabled
+
+
+async def test_vosk_drops_long_silence_and_maps_timestamps() -> None:
+    """Only speech plus a short silence tail reaches vosk; word times are in stream time."""
+    import numpy as np
+    from livekit import rtc
+    from livekit.agents import stt
+
+    runner, url, received = await _fake_vosk(
+        [{"text": "hello", "result": [{"word": "hello", "start": 0.35, "end": 0.6, "conf": 1}]}]
+    )
+    from voice_platform.providers.local import VoskSTT
+
+    stream = VoskSTT(url=url).stream()
+    silence = np.zeros(16000 * 5, dtype=np.int16)  # 5 s quiet: >4 s triggers vosk's "the"
+    tone = (np.sin(np.arange(8000) / 5) * 3000).astype(np.int16)  # 0.5 s "speech"
+    for pcm in (silence, tone):
+        stream.push_frame(rtc.AudioFrame(pcm.tobytes(), 16000, 1, len(pcm)))
+    stream.end_input()
+    events = [ev async for ev in stream]
+    sent = sum(r for r in received if isinstance(r, int)) / 2 / 16000
+    assert sent == pytest.approx(0.3 + 0.5)  # silence tail kept, 4.7 s dropped
+    final = next(ev for ev in events if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT)
+    # vosk saw the word at 0.35 s of sent audio = 0.05 s into the tone = 5.05 s of stream
+    assert final.alternatives[0].start_time == pytest.approx(5.05)
+    usage = [ev for ev in events if ev.type == stt.SpeechEventType.RECOGNITION_USAGE]
+    assert sum(u.recognition_usage.audio_duration for u in usage) == pytest.approx(5.5)
+    await runner.cleanup()

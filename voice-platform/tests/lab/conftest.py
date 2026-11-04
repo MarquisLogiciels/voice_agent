@@ -63,6 +63,7 @@ def worker(
         "VP_ENVIRONMENT": "dev",
         "VP_DATABASE_URL": pg_urls["app"],
         "VP_LOG_JSON": "true",
+        "VP_LOG_LEVEL": os.environ.get("VP_LAB_LOG_LEVEL", "INFO"),
         "VP_AGENT_DISPATCH_NAME": agent_name,
         "VP_WORKER_METRICS_PORT": str(_free_port()),
         "VP_TRUSTED_PROVIDER_ENDPOINTS": f'["{OLLAMA_URL}", "{VOSK_EN}", "{VOSK_FR}"]',
@@ -77,7 +78,14 @@ def worker(
     }
     log = log_path.open("w")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "voice_platform.apps.worker.main", "start"],
+        [
+            sys.executable,
+            "-m",
+            "voice_platform.apps.worker.main",
+            "start",
+            "--log-level",
+            os.environ.get("VP_LAB_LOG_LEVEL", "INFO"),
+        ],
         env=env,
         stdout=log,
         stderr=subprocess.STDOUT,

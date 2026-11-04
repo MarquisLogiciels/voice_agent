@@ -198,6 +198,12 @@ class ConversationConfig(_Model):
     ivr_detection_outbound: bool = Field(
         default=True, description="Detect IVR menus/voicemail on outbound calls (LiveKit)"
     )
+    prewarm_llm_prompt: bool = Field(
+        default=False,
+        description="Send the system prompt to the LLM while the greeting plays so a "
+        "prefix-caching server (Ollama, vLLM, llama.cpp) has it cached before the caller's "
+        "first turn. One extra request per call; useful for self-hosted models",
+    )
     follow_through: bool = Field(
         default=True,
         description="If the agent says it will check something but called no tool that turn, "

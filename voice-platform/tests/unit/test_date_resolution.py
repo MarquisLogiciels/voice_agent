@@ -71,3 +71,17 @@ def test_weekday_conflict(said: str | None, value: str, expected: str | None) ->
     day = resolve_day(value, WED)
     assert day is not None
     assert weekday_conflict(said, value, day, WED) == expected
+
+
+def test_speakable_hours_orders_and_groups_days() -> None:
+    from voice_platform.runtime.prompt import speakable_hours
+
+    # JSONB returns keys alphabetically; the prompt must not
+    schedule = {d: ["09:00-17:00"] for d in ("fri", "mon", "thu", "tue", "wed")}
+    assert speakable_hours(schedule) == "Monday to Friday: 9 AM to 5 PM; Saturday to Sunday: closed"
+    split = {"mon": ["08:30-12:00", "13:00-17:30"], "sat": ["10:00-14:00"]}
+    assert speakable_hours(split) == (
+        "Monday: 8:30 AM to 12 PM, 1 PM to 5:30 PM; Tuesday to Friday: closed; "
+        "Saturday: 10 AM to 2 PM; Sunday: closed"
+    )
+    assert speakable_hours(schedule, "fr-CA").startswith("lundi à vendredi: 9 h à 17 h")

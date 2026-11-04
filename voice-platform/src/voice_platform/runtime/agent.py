@@ -75,6 +75,8 @@ class PlatformAgent(Agent):
             self._announce_task = asyncio.create_task(_wait())
         else:
             self.announcements_done.set()
+        if self.config.conversation.prewarm_llm_prompt:
+            self._prewarm_task = asyncio.create_task(self._prewarm_prompt_cache())
         g = self.config.greeting
         if g.mode == "say":
             self.session.say(g.text, allow_interruptions=g.allow_interruptions)
@@ -84,6 +86,29 @@ class PlatformAgent(Agent):
                 "help.",
                 allow_interruptions=g.allow_interruptions,
             )
+
+    async def _prewarm_prompt_cache(self) -> None:
+        """Prefill the instructions + tools prefix (lab: first-turn TTFT 13 s → see report)."""
+        from livekit.agents import llm as lk_llm
+
+        model = self.session.llm
+        if not isinstance(model, lk_llm.LLM):
+            return
+        try:
+            from livekit.agents import APIConnectOptions
+
+            tools = lk_llm.ToolContext(self.tools).flatten()  # same set the turn will send
+            # the agent's own LLM timeout (a cold prefill can exceed the 10 s default); a
+            # failed prewarm is not worth retrying
+            timeout = self.session.conn_options.llm_conn_options.timeout
+            opts = APIConnectOptions(max_retry=0, timeout=timeout)
+            async with model.chat(
+                chat_ctx=self.chat_ctx.copy(), tools=tools, conn_options=opts
+            ) as stream:
+                async for _ in stream:
+                    break  # prefill is done once the first token arrives
+        except Exception:
+            logger.info("LLM prompt prewarm failed", exc_info=True)
 
     async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: ChatMessage) -> None:
         # 1. Automatic retrieval (mode=auto): inject excerpts for this turn only.

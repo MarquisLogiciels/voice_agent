@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -96,7 +98,7 @@ def lab_config(**extra: Any) -> dict[str, Any]:
             "endpointing": {"min_delay_s": 0.6, "max_delay_s": 3.0},
             "interruption": {"min_duration_s": 0.4, "false_interruption_timeout_s": None},
         },
-        "conversation": {"post_call_summary": False},
+        "conversation": {"post_call_summary": False, "prewarm_llm_prompt": True},
         "tools": {"enabled": ["check_availability"]},
         "integrations": {"calendar": "lab_calendar"},
     }
@@ -210,7 +212,8 @@ async def test_live_voice_conversation(
             pcm = read_wav(synthesize(text, tmp_path / f"u{len(report['turns'])}.wav"))
             _, said_end = await caller.say(pcm)
             reply = await caller.wait_agent_turn(said_end, timeout=timeout)
-            await caller.wait_quiet(1.2)
+            # a caller told "one moment" waits; give follow-through time to act
+            await caller.wait_quiet(float(os.environ.get("VP_LAB_TURN_GAP_S", "3.0")))
             last = caller.speech[-1]
             audio = caller.agent_pcm(reply.start, last.end or reply.end or reply.start)
             t = {
@@ -227,9 +230,17 @@ async def test_live_voice_conversation(
         assert t1["agent_audio_s"] > 0.5
         assert any(w in t1["agent_heard"] for w in ("nine", "9", "monday", "open")), t1
 
-        # 3) availability → the model must call the sandbox calendar tool
+        # 3) availability → sandbox calendar tool → spoken slots. On CPU-only inference the
+        # model may first say "one moment" (follow-through then makes the tool call), so wait
+        # for the utterance that carries the times.
         t2 = await turn("Do you have any openings next Monday?", timeout=180)
-        assert t2["agent_audio_s"] > 0.5
+        if not any(w in t2["agent_heard"] for w in (" am", " pm", "nine", "ten", "eleven")):
+            answer = await caller.wait_agent_turn(caller.speech[-1].end or 0, timeout=90)
+            await caller.wait_quiet(1.5)
+            heard = await vosk_transcribe(caller.agent_pcm(answer.start, answer.end or 0))
+            t2["agent_heard_after_hold"] = heard
+        heard_all = t2["agent_heard"] + " " + t2.get("agent_heard_after_hold", "")
+        assert any(w in heard_all for w in (" am", " pm", "nine", "ten", "eleven")), t2
 
         # 4) barge-in: talk over a long answer and measure how fast the agent yields
         pcm_q = read_wav(
@@ -275,6 +286,10 @@ async def test_live_voice_conversation(
         for t in tool_events
     ]
     report["latency_events"] = [e["payload"] for e in rows["events"] if e["type"] == "turn_latency"]
+    report["event_types"] = dict(Counter(e["type"] for e in rows["events"]))
+    report["follow_through"] = [
+        e["payload"] for e in rows["events"] if e["type"] == "follow_through"
+    ]
     report["recorded_at"] = datetime.now(UTC).isoformat()
     report["worker_log_errors"] = [
         line[:300]

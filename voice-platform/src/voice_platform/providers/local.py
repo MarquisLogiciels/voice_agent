@@ -36,6 +36,10 @@ from livekit.agents import (
 )
 from livekit.agents.language import LanguageCode
 
+from ..shared.logging import get_logger
+
+logger = get_logger(__name__)
+
 VOSK_SAMPLE_RATE = 16000
 
 
@@ -125,13 +129,15 @@ class VoskSTT(stt.STT[Any]):
         return VoskStream(self, language=_lang(language, self._language), conn_options=conn_options)
 
 
-def _gate(pcm: bytes, threshold: float | None) -> bytes:
+def _is_quiet(pcm: bytes, threshold: float | None) -> bool:
     if threshold is None or not pcm:
-        return pcm
+        return False
     samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
-    if float(np.sqrt(np.mean(samples * samples))) < threshold:
-        return bytes(len(pcm))
-    return pcm
+    return float(np.sqrt(np.mean(samples * samples))) < threshold
+
+
+KEEP_SILENCE_S = 0.3
+"""Silence kept after speech (as zeros) before the rest of a quiet run is dropped."""
 
 
 class VoskStream(stt.RecognizeStream):
@@ -141,6 +147,11 @@ class VoskStream(stt.RecognizeStream):
     or on ``eof``, which also ends the connection. When LiveKit flushes at end of turn we send
     ``eof``, emit the final transcript (empty if nothing was recognized, so the turn is never
     left waiting) and continue the stream on a fresh connection.
+
+    Silence handling (lab finding): the kaldi English model emits a spurious "the" after ≥4 s
+    of silence or near-silence before speech, and on low-level noise. Quiet frames (below the
+    noise gate) are therefore sent as zeros for up to ``KEEP_SILENCE_S`` and then dropped;
+    word timestamps are mapped back to real stream time.
     """
 
     def __init__(self, stt_: VoskSTT, *, language: str, conn_options: APIConnectOptions) -> None:
@@ -148,6 +159,8 @@ class VoskStream(stt.RecognizeStream):
         self._vosk = stt_
         self._language = LanguageCode(language)
         self._speaking = False
+        self._stream_s = 0.0  # real audio time consumed by previous segments
+        self._checkpoints: list[tuple[float, float]] = []  # (sent_s, real_s) for this segment
 
     async def _run(self) -> None:
         async with aiohttp.ClientSession() as session:
@@ -171,7 +184,8 @@ class VoskStream(stt.RecognizeStream):
 
     async def _segment(self, ws: aiohttp.ClientWebSocketResponse, first: rtc.AudioFrame) -> bool:
         """One vosk connection. Returns True if it ended on a flush (more audio may follow)."""
-        state: dict[str, Any] = {"flushed": False, "audio_s": 0.0}
+        state: dict[str, Any] = {"flushed": False, "audio_s": 0.0, "sent_s": 0.0, "quiet_s": 0.0}
+        self._checkpoints = [(0.0, self._stream_s)]
         sender = asyncio.create_task(self._send(ws, first, state))
         try:
             await self._recv(ws, state)
@@ -180,6 +194,15 @@ class VoskStream(stt.RecognizeStream):
                 sender.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await sender
+        self._stream_s += state["audio_s"]
+        logger.debug(
+            "vosk segment closed",
+            extra={
+                "audio_s": round(state["audio_s"], 2),
+                "sent_s": round(state["sent_s"], 2),
+                "flushed": state["flushed"],
+            },
+        )
         if state["audio_s"]:
             self._event_ch.send_nowait(
                 stt.SpeechEvent(
@@ -198,11 +221,29 @@ class VoskStream(stt.RecognizeStream):
             samples_per_channel=self._vosk._sample_rate // 10,
         )
         gate = self._vosk._gate_rms
+        zeros = bytes(bstream_bytes := self._vosk._sample_rate // 10 * 2)
+        dropped = False
 
         async def send(frames: list[rtc.AudioFrame]) -> None:
+            nonlocal dropped
             for f in frames:
+                real_start = self._stream_s + state["audio_s"]
                 state["audio_s"] += f.duration
-                await ws.send_bytes(_gate(f.data.tobytes(), gate))
+                raw = f.data.tobytes()
+                if _is_quiet(raw, gate):
+                    state["quiet_s"] += f.duration
+                    if state["quiet_s"] > KEEP_SILENCE_S + 1e-6:
+                        dropped = True
+                        continue
+                    payload = zeros if len(raw) == bstream_bytes else bytes(len(raw))
+                else:
+                    state["quiet_s"] = 0.0
+                    payload = raw
+                if dropped:
+                    self._checkpoints.append((state["sent_s"], real_start))
+                    dropped = False
+                state["sent_s"] += f.duration
+                await ws.send_bytes(payload)
 
         await send(bstream.write(first.data.tobytes()))
         async for data in self._input_ch:
@@ -213,6 +254,14 @@ class VoskStream(stt.RecognizeStream):
         await send(bstream.flush())
         state["eof_sent"] = True
         await ws.send_str('{"eof" : 1}')
+
+    def _real_time(self, sent_t: float) -> float:
+        """Map a vosk timestamp (time within the audio actually sent) to stream time."""
+        base_sent, base_real = self._checkpoints[0] if self._checkpoints else (0.0, 0.0)
+        for cp_sent, cp_real in self._checkpoints:
+            if cp_sent <= sent_t:
+                base_sent, base_real = cp_sent, cp_real
+        return base_real + (sent_t - base_sent)
 
     def _final(self, text: str, words: list[dict[str, Any]]) -> None:
         conf = (sum(w.get("conf", 0.0) for w in words) / len(words)) if words else 0.0
@@ -227,8 +276,8 @@ class VoskStream(stt.RecognizeStream):
                         language=self._language,
                         text=text,
                         confidence=conf,
-                        start_time=float(words[0]["start"]) if words else 0.0,
-                        end_time=float(words[-1]["end"]) if words else 0.0,
+                        start_time=self._real_time(float(words[0]["start"])) if words else 0.0,
+                        end_time=self._real_time(float(words[-1]["end"])) if words else 0.0,
                     )
                 ],
             )
