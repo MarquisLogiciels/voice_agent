@@ -1,0 +1,126 @@
+[project]
+name = "voice-platform"
+version = "0.1.0"
+description = "Multi-tenant AI voice agent platform built on LiveKit Agents"
+requires-python = ">=3.11"
+readme = "README.md"
+license = "Apache-2.0"
+dependencies = [
+    # LiveKit framework + provider plugins (reused, never forked)
+    "livekit-agents>=1.8.10",
+    "livekit-api>=1.2.2,<2",
+    "livekit-plugins-openai>=1.8.10",
+    "livekit-plugins-anthropic>=1.8.10",
+    "livekit-plugins-google>=1.8.10",
+    "livekit-plugins-deepgram>=1.8.10",
+    "livekit-plugins-assemblyai>=1.8.10",
+    "livekit-plugins-elevenlabs>=1.8.10",
+    "livekit-plugins-cartesia>=1.8.10",
+    "livekit-plugins-silero>=1.8.10",
+    "livekit-plugins-turn-detector>=1.8.10",
+    # platform
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.4",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "pgvector>=0.3",
+    "redis>=5.0",
+    "httpx>=0.27",
+    "argon2-cffi>=23.1",
+    "pyjwt>=2.8",
+    "cryptography>=42",
+    "python-multipart>=0.0.9",
+    "pyyaml>=6.0",
+    "phonenumbers>=8.13",
+    "httpcore>=1.0",
+    "pypdf>=4.2",
+    "python-docx>=1.1",
+    "beautifulsoup4>=4.12",
+    "boto3>=1.34",
+    "prometheus-client>=0.20",
+    "opentelemetry-api>=1.45,<1.46",
+    "opentelemetry-sdk>=1.45,<1.46",
+    "opentelemetry-exporter-otlp>=1.45,<1.46",
+]
+
+[project.scripts]
+vp-api = "voice_platform.apps.api.main:run"
+vp-worker = "voice_platform.apps.worker.main:run"
+vp = "voice_platform.apps.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "fakeredis>=2.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "types-pyyaml",
+    "boto3-stubs[s3]",
+    "moto[s3]>=5",
+    "import-linter>=2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voice_platform"]
+
+# Local development resolves LiveKit from this repository so platform code always runs
+# against the exact framework revision checked out here. When the platform is extracted
+# into its own repository, delete this table and the PyPI releases are used instead.
+[tool.uv.sources]
+livekit-agents = { path = "../livekit-agents", editable = true }
+livekit-plugins-openai = { path = "../livekit-plugins/livekit-plugins-openai", editable = true }
+livekit-plugins-anthropic = { path = "../livekit-plugins/livekit-plugins-anthropic", editable = true }
+livekit-plugins-google = { path = "../livekit-plugins/livekit-plugins-google", editable = true }
+livekit-plugins-deepgram = { path = "../livekit-plugins/livekit-plugins-deepgram", editable = true }
+livekit-plugins-assemblyai = { path = "../livekit-plugins/livekit-plugins-assemblyai", editable = true }
+livekit-plugins-elevenlabs = { path = "../livekit-plugins/livekit-plugins-elevenlabs", editable = true }
+livekit-plugins-cartesia = { path = "../livekit-plugins/livekit-plugins-cartesia", editable = true }
+livekit-plugins-silero = { path = "../livekit-plugins/livekit-plugins-silero", editable = true }
+livekit-plugins-turn-detector = { path = "../livekit-plugins/livekit-plugins-turn-detector", editable = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF"]
+ignore = ["S101", "RUF012", "B008", "S311"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108", "S603", "S607", "ASYNC"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["voice_platform"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["voice_platform"]
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+addopts = "-ra --strict-markers"
+markers = [
+    "unit: fast hermetic tests",
+    "integration: tests that use a real Postgres/Redis started locally",
+    "e2e: full conversation flows through the agent runtime",
+    "load: load/throughput measurements (opt-in with --run-load)",
+    "live: tests that need real provider credentials (opt-in)",
+]
