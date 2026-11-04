@@ -21,18 +21,25 @@ os.environ.setdefault("VP_ENCRYPTION_KEYS", "R4n4fW3Yr6t6qQdC7bJ0m3kq9vJb8h0pZp5
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--run-load", action="store_true", help="run load tests")
     parser.addoption("--run-live", action="store_true", help="run tests needing real credentials")
+    parser.addoption(
+        "--run-lab",
+        action="store_true",
+        help="run tests against the self-hosted lab (infrastructure/lab/docker-compose.lab.yml)",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     for item in items:
         parts = Path(str(item.fspath)).parts
-        for category in ("unit", "integration", "e2e", "load", "evaluations"):
+        for category in ("unit", "integration", "e2e", "load", "evaluations", "lab"):
             if category in parts:
                 item.add_marker(
                     getattr(pytest.mark, "e2e" if category == "evaluations" else category)
                 )
         if "load" in parts and not config.getoption("--run-load"):
             item.add_marker(pytest.mark.skip(reason="load tests need --run-load"))
+        if "lab" in parts and not config.getoption("--run-lab"):
+            item.add_marker(pytest.mark.skip(reason="lab tests need --run-lab"))
         if item.get_closest_marker("live") and not config.getoption("--run-live"):
             item.add_marker(pytest.mark.skip(reason="live tests need --run-live"))
 

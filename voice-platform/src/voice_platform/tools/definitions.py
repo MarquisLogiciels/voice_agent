@@ -27,7 +27,15 @@ from ..integrations.base import (
 from ..shared.crypto import stable_hash
 from ..shared.phone import try_normalize_e164
 from .interfaces import ToolEnv
-from .scheduling import free_slots, is_within_hours, overlaps, speakable
+from .scheduling import (
+    free_slots,
+    is_within_hours,
+    overlaps,
+    resolve_day,
+    speakable,
+    speakable_day,
+    weekday_conflict,
+)
 
 
 class ToolRefusal(Exception):
@@ -276,24 +284,49 @@ async def add_note(env: ToolEnv, a: AddNoteArgs) -> dict[str, Any]:
 # ============================================================================================
 
 
-def _parse_day(value: str, env: ToolEnv) -> date:
-    try:
-        return date.fromisoformat(value)
-    except ValueError as e:
-        raise ToolRefusal("invalid_arguments", "Use the date format YYYY-MM-DD.") from e
+def _parse_day(value: str, env: ToolEnv) -> tuple[date, str | None]:
+    """Resolve the requested day; returns (day, note for the model or None)."""
+    today = env.clock().astimezone(_tz(env)).date()
+    day = resolve_day(value, today)
+    if day is None:
+        raise ToolRefusal(
+            "invalid_arguments", "Use the date format YYYY-MM-DD (or 'tomorrow' or a weekday)."
+        )
+    word = weekday_conflict(env.state.last_user_text, value, day, today)
+    if word is not None:
+        corrected = resolve_day(word, today)
+        if corrected is not None:
+            # The model's calendar arithmetic contradicted the caller's own words; the
+            # spoken day in the result lets the caller catch any remaining misunderstanding.
+            return corrected, (
+                f"{value} is a {day.strftime('%A')}, but the caller said '{word}', so this is "
+                f"{speakable_day(corrected, env.config.language)}. Mention the day when you "
+                "answer."
+            )
+    return day, None
 
 
 class CheckAvailabilityArgs(_Args):
-    date: str = Field(description="Requested day, YYYY-MM-DD, in the business timezone")
+    # Small models compute dates badly but copy words well (lab finding: Qwen 2.5 3B went
+    # from wrong weekdays to 5/5 correct with this wording); the platform resolves the words.
+    date: str = Field(
+        description="The day exactly as the caller said it, e.g. 'tomorrow', 'next monday', "
+        "'friday', or YYYY-MM-DD if the caller gave a full date. The system converts it."
+    )
     time_preference: Literal["morning", "afternoon", "evening", "any"] = "any"
-    duration_minutes: int | None = Field(default=None, ge=5, le=480)
+    duration_minutes: int | None = Field(
+        default=None,
+        ge=5,
+        le=480,
+        description="Only if the caller explicitly states how long; otherwise omit.",
+    )
 
 
 async def check_availability(env: ToolEnv, a: CheckAvailabilityArgs) -> dict[str, Any]:
     cal = _require(env, "calendar")
     tz = _tz(env)
     policy = env.config.business.appointments
-    day = _parse_day(a.date, env)
+    day, date_note = _parse_day(a.date, env)
     start = datetime.combine(day, datetime.min.time(), tz)
     busy = await cal.busy_intervals(start, start + timedelta(days=1))
     slots = free_slots(
@@ -309,16 +342,29 @@ async def check_availability(env: ToolEnv, a: CheckAvailabilityArgs) -> dict[str
     lang = env.config.language
     return {
         "date": day.isoformat(),
+        "day": speakable_day(day, lang),
         "available": bool(slots),
         "slots": [
             {"start": s.start.isoformat(), "spoken": speakable(s.start, tz, lang)} for s in slots
         ],
-        "note": None if slots else "No openings that day; offer to check another day.",
+        "note": " ".join(
+            n
+            for n in (
+                date_note,
+                None if slots else "No openings that day; offer to check another day.",
+            )
+            if n
+        )
+        or None,
     }
 
 
 class GetAppointmentsArgs(_Args):
-    date: str | None = Field(default=None, description="YYYY-MM-DD; omit for the next 30 days")
+    date: str | None = Field(
+        default=None,
+        description="The day as the caller said it (e.g. 'tomorrow', 'friday') or "
+        "YYYY-MM-DD; omit for the next 30 days",
+    )
 
 
 async def get_appointments(env: ToolEnv, a: GetAppointmentsArgs) -> dict[str, Any]:
@@ -332,7 +378,7 @@ async def get_appointments(env: ToolEnv, a: GetAppointmentsArgs) -> dict[str, An
             "own phone number, which is unavailable.",
         )
     if a.date:
-        day = _parse_day(a.date, env)
+        day, _ = _parse_day(a.date, env)
         start = datetime.combine(day, datetime.min.time(), tz)
         end = start + timedelta(days=1)
     else:

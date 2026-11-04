@@ -34,6 +34,8 @@ dependencies = [
     "cryptography>=42",
     "python-multipart>=0.0.9",
     "pyyaml>=6.0",
+    "numpy>=1.26",
+    "aiohttp>=3.9",
     "phonenumbers>=8.13",
     "email-validator>=2.1",
     "tzdata>=2024.1",
@@ -128,4 +130,5 @@ markers = [
     "e2e: full conversation flows through the agent runtime",
     "load: load/throughput measurements (opt-in with --run-load)",
     "live: tests that need real provider credentials (opt-in)",
+    "lab: tests against the self-hosted lab stack (opt-in with --run-lab)",
 ]

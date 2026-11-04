@@ -198,6 +198,11 @@ class ConversationConfig(_Model):
     ivr_detection_outbound: bool = Field(
         default=True, description="Detect IVR menus/voicemail on outbound calls (LiveKit)"
     )
+    follow_through: bool = Field(
+        default=True,
+        description="If the agent says it will check something but called no tool that turn, "
+        "immediately run one follow-up generation asking it to call the tool",
+    )
 
 
 # --------------------------------------------------------------------------------------------

@@ -150,3 +150,44 @@ async def test_local_tts_produces_audio() -> None:
         > 1000
     )  # not silence
     await asyncio.sleep(0)
+
+
+async def test_vosk_manual_flush_finalizes_and_reconnects() -> None:
+    from livekit import rtc
+    from livekit.agents import stt
+
+    from voice_platform.providers.local import VoskSTT
+
+    runner, url, received = await _fake_vosk([])
+    engine = VoskSTT(url=url)
+    assert engine.capabilities.manual_flush
+    stream = engine.stream()
+    frame = rtc.AudioFrame(
+        b"\x00\x00" * 1600, sample_rate=16000, num_channels=1, samples_per_channel=1600
+    )
+    stream.push_frame(frame)
+    stream.flush()  # end of turn: must yield a final even though nothing was recognized
+    stream.push_frame(frame)
+    stream.end_input()
+    events = [ev async for ev in stream]
+    finals = [ev for ev in events if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT]
+    assert len(finals) == 2  # one per connection (flush, then end of input)
+    configs = [r for r in received if isinstance(r, dict) and "config" in r]
+    eofs = [r for r in received if r == {"eof": 1}]
+    assert len(configs) == 2 and len(eofs) == 2  # reconnected after the flush
+    usage = [ev for ev in events if ev.type == stt.SpeechEventType.RECOGNITION_USAGE]
+    assert sum(u.recognition_usage.audio_duration for u in usage) == pytest.approx(0.2)
+    await runner.cleanup()
+
+
+def test_vosk_noise_gate_zeroes_near_silence_only() -> None:
+    import numpy as np
+
+    from voice_platform.providers.local import _gate
+
+    threshold = 32768 * 10 ** (-60 / 20)
+    faint = np.random.default_rng(0).normal(0, 3, 1600).astype(np.int16).tobytes()
+    speech = (np.sin(np.arange(1600) / 5) * 3000).astype(np.int16).tobytes()
+    assert _gate(faint, threshold) == bytes(len(faint))  # vosk would hear "the"
+    assert _gate(speech, threshold) == speech
+    assert _gate(faint, None) == faint  # gate disabled

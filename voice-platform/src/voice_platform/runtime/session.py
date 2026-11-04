@@ -25,6 +25,7 @@ from ..tools.executor import ToolExecutor
 from ..tools.interfaces import ToolEnv, TransferController
 from ..tools.ledger import InMemoryLedger, ToolLedger
 from .agent import PlatformAgent
+from .followthrough import FollowThroughGuard
 from .policies import DurationPolicy, SilencePolicy
 from .prompt import build_instructions
 from .recorder import CallRecorder, ConversationSink, MemorySink
@@ -194,6 +195,29 @@ def build_runtime_session(
         else [],
     )
     recorder.attach(session)
+
+    guard = (
+        FollowThroughGuard(
+            tool_count=lambda: env.state.tool_calls,
+            trigger=lambda instructions: session.generate_reply(instructions=instructions),
+            on_triggered=lambda text: recorder.add({"type": "follow_through", "reply": text}),
+        )
+        if cfg.conversation.follow_through and cfg.tools.enabled
+        else None
+    )
+
+    def _on_item(ev: Any) -> None:
+        item = ev.item
+        if getattr(item, "type", None) != "message":
+            return
+        if item.role == "user":
+            env.state.last_user_text = item.text_content
+            if guard is not None:
+                guard.user_turn()
+        elif item.role == "assistant" and guard is not None:
+            guard.agent_reply(item.text_content or "", interrupted=bool(item.interrupted))
+
+    session.on("conversation_item_added", _on_item)
     recorder.add(
         {
             "type": "lifecycle",

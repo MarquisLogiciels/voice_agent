@@ -43,6 +43,8 @@ class ConversationState:
     identified_contact_id: str | None = None
     transfer_attempted: bool = False
     transfer_result: TransferResult | None = None
+    last_user_text: str | None = None
+    """Latest committed caller utterance (for deterministic argument cross-checks)."""
 
 
 @dataclass

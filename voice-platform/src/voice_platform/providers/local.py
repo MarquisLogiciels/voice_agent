@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import aiohttp
+import numpy as np
 from livekit import rtc
 from livekit.agents import (
     DEFAULT_API_CONNECT_OPTIONS,
@@ -50,16 +51,19 @@ class VoskSTT(stt.STT[Any]):
         language: str = "en",
         sample_rate: int = VOSK_SAMPLE_RATE,
         connect_timeout_s: float = 5.0,
+        noise_gate_dbfs: float | None = -60.0,
     ) -> None:
         super().__init__(
             capabilities=stt.STTCapabilities(
-                streaming=True, interim_results=True, offline_recognize=True
+                streaming=True, interim_results=True, offline_recognize=True, manual_flush=True
             )
         )
         self._url = url
         self._language = language
         self._sample_rate = sample_rate
         self._connect_timeout = connect_timeout_s
+        # int16 RMS below which a frame is replaced with zeros
+        self._gate_rms = None if noise_gate_dbfs is None else 32768 * 10 ** (noise_gate_dbfs / 20)
 
     @property
     def model(self) -> str:
@@ -121,43 +125,119 @@ class VoskSTT(stt.STT[Any]):
         return VoskStream(self, language=_lang(language, self._language), conn_options=conn_options)
 
 
+def _gate(pcm: bytes, threshold: float | None) -> bytes:
+    if threshold is None or not pcm:
+        return pcm
+    samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+    if float(np.sqrt(np.mean(samples * samples))) < threshold:
+        return bytes(len(pcm))
+    return pcm
+
+
 class VoskStream(stt.RecognizeStream):
+    """Streams audio to vosk-server; supports LiveKit's manual flush.
+
+    vosk-server only finalizes on its own endpointer (adds ~1.5–2 s after the caller stops)
+    or on ``eof``, which also ends the connection. When LiveKit flushes at end of turn we send
+    ``eof``, emit the final transcript (empty if nothing was recognized, so the turn is never
+    left waiting) and continue the stream on a fresh connection.
+    """
+
     def __init__(self, stt_: VoskSTT, *, language: str, conn_options: APIConnectOptions) -> None:
         super().__init__(stt=stt_, conn_options=conn_options, sample_rate=stt_._sample_rate)
         self._vosk = stt_
         self._language = LanguageCode(language)
         self._speaking = False
-        self._audio_s = 0.0
 
     async def _run(self) -> None:
         async with aiohttp.ClientSession() as session:
-            ws = await self._vosk._connect(session)
-            try:
-                await asyncio.gather(self._send(ws), self._recv(ws))
-            finally:
-                with contextlib.suppress(Exception):
-                    await ws.close()
+            while True:
+                try:
+                    first = await self._input_ch.recv()
+                except utils.aio.ChanClosed:
+                    return
+                if isinstance(first, self._FlushSentinel):
+                    self._final("", [])  # flush with no new audio: nothing to wait for
+                    continue
+                # connect lazily, only once there is audio to recognize
+                ws = await self._vosk._connect(session)
+                try:
+                    more = await self._segment(ws, first)
+                finally:
+                    with contextlib.suppress(Exception):
+                        await ws.close()
+                if not more:
+                    return
 
-    async def _send(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+    async def _segment(self, ws: aiohttp.ClientWebSocketResponse, first: rtc.AudioFrame) -> bool:
+        """One vosk connection. Returns True if it ended on a flush (more audio may follow)."""
+        state: dict[str, Any] = {"flushed": False, "audio_s": 0.0}
+        sender = asyncio.create_task(self._send(ws, first, state))
+        try:
+            await self._recv(ws, state)
+        finally:
+            if not sender.done():
+                sender.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sender
+        if state["audio_s"]:
+            self._event_ch.send_nowait(
+                stt.SpeechEvent(
+                    type=stt.SpeechEventType.RECOGNITION_USAGE,
+                    recognition_usage=stt.RecognitionUsage(audio_duration=state["audio_s"]),
+                )
+            )
+        return bool(state["flushed"])
+
+    async def _send(
+        self, ws: aiohttp.ClientWebSocketResponse, first: rtc.AudioFrame, state: dict[str, Any]
+    ) -> None:
         bstream = utils.audio.AudioByteStream(
             sample_rate=self._vosk._sample_rate,
             num_channels=1,
             samples_per_channel=self._vosk._sample_rate // 10,
         )
-        async for data in self._input_ch:
-            frames = (
-                bstream.flush()
-                if isinstance(data, self._FlushSentinel)
-                else bstream.write(data.data.tobytes())
-            )
+        gate = self._vosk._gate_rms
+
+        async def send(frames: list[rtc.AudioFrame]) -> None:
             for f in frames:
-                self._audio_s += f.duration
-                await ws.send_bytes(f.data.tobytes())
-        for f in bstream.flush():
-            await ws.send_bytes(f.data.tobytes())
+                state["audio_s"] += f.duration
+                await ws.send_bytes(_gate(f.data.tobytes(), gate))
+
+        await send(bstream.write(first.data.tobytes()))
+        async for data in self._input_ch:
+            if isinstance(data, self._FlushSentinel):
+                state["flushed"] = True
+                break
+            await send(bstream.write(data.data.tobytes()))
+        await send(bstream.flush())
+        state["eof_sent"] = True
         await ws.send_str('{"eof" : 1}')
 
-    async def _recv(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+    def _final(self, text: str, words: list[dict[str, Any]]) -> None:
+        conf = (sum(w.get("conf", 0.0) for w in words) / len(words)) if words else 0.0
+        if text and not self._speaking:
+            self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH))
+            self._speaking = True
+        self._event_ch.send_nowait(
+            stt.SpeechEvent(
+                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                alternatives=[
+                    stt.SpeechData(
+                        language=self._language,
+                        text=text,
+                        confidence=conf,
+                        start_time=float(words[0]["start"]) if words else 0.0,
+                        end_time=float(words[-1]["end"]) if words else 0.0,
+                    )
+                ],
+            )
+        )
+        if self._speaking:
+            self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.END_OF_SPEECH))
+            self._speaking = False
+
+    async def _recv(self, ws: aiohttp.ClientWebSocketResponse, state: dict[str, Any]) -> None:
         async for msg in ws:
             if msg.type != aiohttp.WSMsgType.TEXT:
                 break
@@ -175,37 +255,16 @@ class VoskStream(stt.RecognizeStream):
                         alternatives=[stt.SpeechData(language=self._language, text=partial)],
                     )
                 )
-            text = data.get("text")
-            if text:
-                words = data.get("result") or []
-                conf = (sum(w.get("conf", 0.0) for w in words) / len(words)) if words else 0.0
-                if not self._speaking:
-                    self._event_ch.send_nowait(
-                        stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
-                    )
-                self._event_ch.send_nowait(
-                    stt.SpeechEvent(
-                        type=stt.SpeechEventType.FINAL_TRANSCRIPT,
-                        alternatives=[
-                            stt.SpeechData(
-                                language=self._language,
-                                text=text,
-                                confidence=conf,
-                                start_time=float(words[0]["start"]) if words else 0.0,
-                                end_time=float(words[-1]["end"]) if words else 0.0,
-                            )
-                        ],
-                    )
-                )
-                self._event_ch.send_nowait(stt.SpeechEvent(type=stt.SpeechEventType.END_OF_SPEECH))
-                self._speaking = False
-        if self._audio_s:
-            self._event_ch.send_nowait(
-                stt.SpeechEvent(
-                    type=stt.SpeechEventType.RECOGNITION_USAGE,
-                    recognition_usage=stt.RecognitionUsage(audio_duration=self._audio_s),
-                )
-            )
+            elif "text" in data:
+                text = data.get("text") or ""
+                if text:
+                    self._final(text, data.get("result") or [])
+                    if state.get("eof_sent"):
+                        state["final_after_eof"] = True
+        # vosk closes the connection right after the final result for ``eof``; make sure a
+        # flushed turn always gets a FINAL_TRANSCRIPT (possibly empty) so it never stalls.
+        if state.get("eof_sent") and not state.get("final_after_eof"):
+            self._final("", [])
 
 
 _PICO_LANGS = {

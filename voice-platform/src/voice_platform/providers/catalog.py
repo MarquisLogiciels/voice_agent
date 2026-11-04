@@ -179,17 +179,25 @@ def _livekit_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
 
 class VoskOptions(_Opts):
     url: str = Field(pattern=r"^wss?://[^\s]+$", description="Vosk server WebSocket URL")
+    noise_gate_dbfs: float | None = Field(
+        default=-60.0,
+        ge=-90,
+        le=-20,
+        description="100 ms frames quieter than this are sent as digital silence (vosk "
+        "transcribes near-silent noise as 'the'); null disables the gate",
+    )
 
 
 def _vosk_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
     from .local import VoskSTT
 
-    url = VoskOptions.model_validate(ref.options).url
+    opts = VoskOptions.model_validate(ref.options)
+    url = opts.url
     if not ctx.is_trusted(url):
         raise ValueError(
             "vosk url must be a platform-operated endpoint (VP_TRUSTED_PROVIDER_ENDPOINTS)"
         )
-    return VoskSTT(url=url, language=_lang(ref, ctx))
+    return VoskSTT(url=url, language=_lang(ref, ctx), noise_gate_dbfs=opts.noise_gate_dbfs)
 
 
 # ============================================================================================

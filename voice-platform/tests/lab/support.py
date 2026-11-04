@@ -7,7 +7,6 @@ so tests observe exactly what a human on the call would hear.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
 import shutil
@@ -154,17 +153,25 @@ class AgentSpeech:
     end: float | None = None
 
 
+FRAME = SAMPLE_RATE // 100  # 10 ms
+
+
 @dataclass
 class Caller:
-    """A participant that talks like a phone caller and listens to the agent."""
+    """A participant that behaves like a phone line: it streams audio continuously (speech
+    when talking, digital silence otherwise) and records everything the agent publishes."""
 
     room_name: str
     identity: str = "caller"
     agent_audio: list[tuple[float, np.ndarray]] = field(default_factory=list)
+    caller_audio: list[np.ndarray] = field(default_factory=list)
     transcriptions: list[dict[str, Any]] = field(default_factory=list)
     speech: list[AgentSpeech] = field(default_factory=list)
     room: Any = None
     _source: Any = None
+    _pending: list[tuple[np.ndarray, asyncio.Future[tuple[float, float]]]] = field(
+        default_factory=list
+    )
     _tasks: list[asyncio.Task[Any]] = field(default_factory=list)
     _last_loud: float = 0.0
 
@@ -201,11 +208,36 @@ class Caller:
 
         self.room.register_text_stream_handler("lk.transcription", _on_text)
         await self.room.connect(LIVEKIT_URL, token)
-        self._source = rtc.AudioSource(SAMPLE_RATE, 1)
+        # small queue so capture timestamps match what the far end receives
+        self._source = rtc.AudioSource(SAMPLE_RATE, 1, queue_size_ms=60)
         track = rtc.LocalAudioTrack.create_audio_track("mic", self._source)
         await self.room.local_participant.publish_track(
             track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
         )
+        self._tasks.append(asyncio.create_task(self._pump()))
+
+    async def _pump(self) -> None:
+        from livekit import rtc
+
+        silence = np.zeros(FRAME, dtype=np.int16)
+        while True:
+            if self._pending:
+                pcm, fut = self._pending.pop(0)
+                start = time.monotonic()
+                for i in range(0, len(pcm), FRAME):
+                    chunk = pcm[i : i + FRAME]
+                    if len(chunk) < FRAME:
+                        chunk = np.pad(chunk, (0, FRAME - len(chunk)))
+                    self.caller_audio.append(chunk)
+                    await self._source.capture_frame(
+                        rtc.AudioFrame(chunk.tobytes(), SAMPLE_RATE, 1, FRAME)
+                    )
+                fut.set_result((start, time.monotonic()))
+            else:
+                self.caller_audio.append(silence)
+                await self._source.capture_frame(
+                    rtc.AudioFrame(silence.tobytes(), SAMPLE_RATE, 1, FRAME)
+                )
 
     async def _record(self, track: Any) -> None:
         from livekit import rtc
@@ -215,41 +247,21 @@ class Caller:
             now = time.monotonic()
             pcm = np.frombuffer(ev.frame.data, dtype=np.int16).copy()
             self.agent_audio.append((now, pcm))
-            loud = float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2))) > 300
-            if loud:
+            if float(np.sqrt(np.mean(pcm.astype(np.float32) ** 2))) > 300:
                 if not self.speech or self.speech[-1].end is not None:
                     self.speech.append(AgentSpeech(start=now))
                 self._last_loud = now
-            elif self.speech and self.speech[-1].end is None and now - self._last_loud > 0.6:
+            elif self.speech and self.speech[-1].end is None and now - self._last_loud > 0.8:
                 self.speech[-1].end = self._last_loud
 
+    def say_nowait(self, pcm: np.ndarray) -> asyncio.Future[tuple[float, float]]:
+        fut: asyncio.Future[tuple[float, float]] = asyncio.get_running_loop().create_future()
+        self._pending.append((pcm, fut))
+        return fut
+
     async def say(self, pcm: np.ndarray) -> tuple[float, float]:
-        """Stream speech in real time (10 ms frames). Returns (start, end) monotonic times."""
-        from livekit import rtc
-
-        start = time.monotonic()
-        step = SAMPLE_RATE // 100
-        for i in range(0, len(pcm), step):
-            chunk = pcm[i : i + step]
-            if len(chunk) < step:
-                chunk = np.pad(chunk, (0, step - len(chunk)))
-            await self._source.capture_frame(rtc.AudioFrame(chunk.tobytes(), SAMPLE_RATE, 1, step))
-        return start, time.monotonic()
-
-    async def silence(self, seconds: float) -> None:
-        await self.say(np.zeros(int(SAMPLE_RATE * seconds), dtype=np.int16))
-
-    async def wait_agent_turn(self, after: float, timeout: float) -> AgentSpeech:
-        """Wait until the agent starts speaking after ``after`` and then stops."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            for sp in self.speech:
-                if sp.start > after and sp.end is not None:
-                    return sp
-            await asyncio.sleep(0.1)
-            # keep the uplink alive with silence so VAD/turn detection see audio
-            await self.silence(0.1)
-        raise TimeoutError(f"agent did not speak within {timeout}s")
+        """Speak in real time. Returns (start, end) monotonic times of the utterance."""
+        return await self.say_nowait(pcm)
 
     async def wait_agent_start(self, after: float, timeout: float) -> AgentSpeech:
         deadline = time.monotonic() + timeout
@@ -257,17 +269,43 @@ class Caller:
             for sp in self.speech:
                 if sp.start > after:
                     return sp
-            await self.silence(0.1)
+            await asyncio.sleep(0.05)
         raise TimeoutError(f"agent did not start speaking within {timeout}s")
+
+    async def wait_agent_turn(self, after: float, timeout: float) -> AgentSpeech:
+        """Wait for the first agent utterance that starts after ``after`` to finish."""
+        sp = await self.wait_agent_start(after, timeout)
+        deadline = time.monotonic() + timeout
+        while sp.end is None and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        if sp.end is None:
+            raise TimeoutError("agent did not stop speaking")
+        return sp
+
+    async def wait_quiet(self, seconds: float, timeout: float = 60) -> None:
+        """Wait until the agent has been silent for ``seconds``."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            busy = self.speech and self.speech[-1].end is None
+            if not busy and time.monotonic() - self._last_loud > seconds:
+                return
+            await asyncio.sleep(0.05)
+        raise TimeoutError("agent never went quiet")
 
     def agent_pcm(self, start: float, end: float) -> np.ndarray:
         parts = [p for t, p in self.agent_audio if start - 0.05 <= t <= end + 0.05]
         return np.concatenate(parts) if parts else np.zeros(0, dtype=np.int16)
 
+    def agent_recording(self) -> np.ndarray:
+        return (
+            np.concatenate([p for _, p in self.agent_audio])
+            if self.agent_audio
+            else np.zeros(0, dtype=np.int16)
+        )
+
     async def disconnect(self) -> None:
-        if self.room is not None:
-            await self.room.disconnect()
         for t in self._tasks:
             t.cancel()
-        with contextlib.suppress(Exception):
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self.room is not None:
+            await self.room.disconnect()

@@ -11,6 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from ..config.schema import AgentConfig
+from ..tools.scheduling import upcoming_days
 
 _LANG_NAMES = {
     "en": "English",
@@ -53,7 +54,10 @@ def build_instructions(
         )
     parts.append(lang_line)
 
-    facts = [f"Current date and time: {local_now.strftime('%A %Y-%m-%d %H:%M')} ({b.timezone})."]
+    facts = [
+        f"Current date and time: {local_now.strftime('%A %Y-%m-%d %H:%M')} ({b.timezone}).",
+        f"Upcoming dates: {upcoming_days(local_now.date())}.",
+    ]
     if b.description:
         facts.append(f"About the business: {b.description}")
     if b.address:

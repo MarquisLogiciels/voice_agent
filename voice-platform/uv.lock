@@ -4762,6 +4762,7 @@ name = "voice-platform"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "alembic" },
     { name = "argon2-cffi" },
     { name = "asyncpg" },
@@ -4783,6 +4784,8 @@ dependencies = [
     { name = "livekit-plugins-openai" },
     { name = "livekit-plugins-silero" },
     { name = "livekit-plugins-turn-detector" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-sdk" },
@@ -4818,6 +4821,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9" },
     { name = "alembic", specifier = ">=1.13" },
     { name = "argon2-cffi", specifier = ">=23.1" },
     { name = "asyncpg", specifier = ">=0.29" },
@@ -4839,6 +4843,7 @@ requires-dist = [
     { name = "livekit-plugins-openai", editable = "../livekit-plugins/livekit-plugins-openai" },
     { name = "livekit-plugins-silero", editable = "../livekit-plugins/livekit-plugins-silero" },
     { name = "livekit-plugins-turn-detector", editable = "../livekit-plugins/livekit-plugins-turn-detector" },
+    { name = "numpy", specifier = ">=1.26" },
     { name = "opentelemetry-api", specifier = ">=1.45,<1.46" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.45,<1.46" },
     { name = "opentelemetry-sdk", specifier = ">=1.45,<1.46" },

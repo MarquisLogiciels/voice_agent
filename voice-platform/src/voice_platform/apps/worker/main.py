@@ -5,7 +5,10 @@ Run: ``vp-worker start`` (production) · ``vp-worker dev`` (hot reload) · see L
 
 from __future__ import annotations
 
+import os
+import urllib.request
 from typing import Any
+from urllib.parse import urlparse
 
 from livekit.agents import AgentServer, JobContext, JobProcess, cli
 
@@ -47,23 +50,41 @@ def prewarm(proc: JobProcess) -> None:
     _get_services()
 
 
+def worker_http_proxy(ws_url: str) -> str | None:
+    """Proxy for the worker's LiveKit connection.
+
+    ``AgentServer`` uses ``HTTPS_PROXY``/``HTTP_PROXY`` unconditionally and ignores
+    ``NO_PROXY``, so a LiveKit server on an internal network becomes unreachable behind an
+    egress proxy. Honour ``NO_PROXY`` here and pass the result explicitly.
+    """
+    host = urlparse(ws_url).hostname or ""
+    if host and urllib.request.proxy_bypass(host):
+        return None
+    return os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or None
+
+
 def build_server() -> AgentServer:
     settings = get_settings()
+    ws_url = os.environ.get("LIVEKIT_URL") or settings.livekit_url
     server = AgentServer(
+        http_proxy=worker_http_proxy(ws_url),
         setup_fnc=prewarm,
         prometheus_port=settings.worker_metrics_port,
         job_memory_warn_mb=700,
         drain_timeout=1800,
     )
 
-    @server.rtc_session(agent_name=settings.agent_dispatch_name)
-    async def entrypoint(ctx: JobContext) -> None:
-        from .call import CallHandler
-
-        vad: Any = ctx.proc.userdata.get("vad")
-        await CallHandler(ctx, _get_services(), vad=vad).run()
-
+    # The entrypoint must be importable by qualified name: in production LiveKit runs each
+    # job in a separate process (forkserver) and pickles the function reference.
+    server.rtc_session(agent_name=settings.agent_dispatch_name)(entrypoint)
     return server
+
+
+async def entrypoint(ctx: JobContext) -> None:
+    from .call import CallHandler
+
+    vad: Any = ctx.proc.userdata.get("vad")
+    await CallHandler(ctx, _get_services(), vad=vad).run()
 
 
 def run() -> None:
