@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterable, AsyncIterator
 from typing import Any
 
-from livekit.agents import Agent, RunContext, function_tool
+from livekit.agents import Agent, ModelSettings, RunContext, function_tool
 from livekit.agents.llm import ChatContext, ChatMessage
 
 from ..config.schema import AgentConfig
@@ -14,6 +15,7 @@ from ..shared.logging import get_logger
 from ..tools.executor import ToolExecutor
 from .context import ContextCompactor
 from .escalation import handoff_summary, wants_human
+from .followthrough import starts_like_tool_call
 
 logger = get_logger(__name__)
 
@@ -122,6 +124,32 @@ class PlatformAgent(Agent):
         msg = self.config.transfer.failure_message
         self.session.say(msg)
         return msg
+
+    def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings) -> Any:
+        """Never speak a tool call the model wrote out as text (benchmark: Qwen 2.5 3B replied
+        'Search_knowledge_base({"query": "cleaning cost"})'); the follow-through guard then
+        makes the real call. Normal replies stream through unchanged."""
+        names = {t.llm_name.lower() for t in self.executor.tools.values()}
+
+        async def filtered() -> AsyncIterator[str]:
+            head, decided = "", False
+            async for chunk in text:
+                if decided:
+                    yield chunk
+                    continue
+                head += chunk
+                if "(" in head or len(head) >= 48:
+                    decided = True
+                    if starts_like_tool_call(head, names):
+                        logger.info("suppressed a textual tool call from speech")
+                        async for _ in text:  # drain without speaking
+                            pass
+                        return
+                    yield head
+            if not decided and head:
+                yield head
+
+        return Agent.default.tts_node(self, filtered(), model_settings)
 
     async def _prewarm_prompt_cache(self) -> None:
         """Prefill the instructions + tools prefix (lab: first-turn TTFT 13 s → see report)."""

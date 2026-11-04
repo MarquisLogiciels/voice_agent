@@ -51,3 +51,25 @@ def test_no_trigger_when_a_tool_ran_or_reply_was_interrupted() -> None:
     guard.user_turn()
     assert not guard.agent_reply("Let me check that for you.", interrupted=True)
     assert fired == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Got it, Paul. I'll add you to our records. You can expect a call back shortly.",
+        "Someone will call you back tomorrow.",
+        "Sure, let's check available slots for Tuesday in the morning.",  # benchmark case
+        'Search_knowledge_base({"query": "cleaning cost"})',
+    ],
+)
+def test_promises_and_textual_tool_calls_count_as_pending(text: str) -> None:
+    tools = {"search_knowledge_base", "create_lead"}
+    assert announces_pending_action(text, tools)
+
+
+def test_textual_tool_call_needs_an_enabled_tool() -> None:
+    from voice_platform.runtime.followthrough import starts_like_tool_call
+
+    assert starts_like_tool_call("search_knowledge_base(", {"search_knowledge_base"})
+    assert not starts_like_tool_call("Sure (I can help", {"search_knowledge_base"})
+    assert not starts_like_tool_call("print(", {"search_knowledge_base"})

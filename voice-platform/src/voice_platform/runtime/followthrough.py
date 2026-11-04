@@ -20,6 +20,7 @@ from typing import Any
 
 _PENDING = re.compile(
     r"\b(let me (check|look|see|find|verify|pull|search)"
+    r"|let'?s (check|look|see|find)"
     r"|i'?ll (check|look|see|find|verify|pull|search)"
     r"|i will (check|look|see|find|verify|search)"
     r"|i'm (checking|looking)|i am (checking|looking)"
@@ -31,6 +32,34 @@ _PENDING = re.compile(
     re.IGNORECASE,
 )
 
+# Promises of an action ("I'll add you to our records", "someone will call you back").
+_PROMISE = re.compile(
+    r"\b(i'?ll|i will|let me|i'm going to|i am going to)\s+(add|note|record|log|create|"
+    r"schedule|pass (this|that|it) (along|on)|let (the|our) team know|have someone|"
+    r"get someone|make (a )?note)"
+    r"|\b(someone|a team member|our team|we)\s+will\s+(call|contact|reach out to)\s+you"
+    r"|\byou(?:'ll| will)\s+(get|receive)\s+a\s+call"
+    r"|\bje\s+(vais|vous)\s+(ajoute|noter|inscri)",
+    re.IGNORECASE,
+)
+# A tool call written out as text: 'search_knowledge_base({"query": ...})'.
+_TEXT_CALL = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\{", re.DOTALL)
+
+
+def starts_like_tool_call(head: str, tool_names: set[str]) -> bool:
+    """True once the beginning of a reply reads ``<enabled tool name>(`` (streamed text)."""
+    m = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", head or "")
+    return bool(m and m.group(1).lower() in tool_names)
+
+
+def textual_tool_call(text: str, tool_names: set[str]) -> str | None:
+    """Name of the tool the model wrote as text instead of calling (small models do this)."""
+    m = _TEXT_CALL.match(text or "")
+    if m and m.group(1).lower() in tool_names:
+        return m.group(1).lower()
+    return None
+
+
 FOLLOW_UP_INSTRUCTIONS = (
     "You just told the caller you would check or look something up, but you did not call a "
     "tool. Call the appropriate tool now, without any text reply first. If no tool applies, "
@@ -38,11 +67,17 @@ FOLLOW_UP_INSTRUCTIONS = (
 )
 
 
-def announces_pending_action(text: str) -> bool:
-    """A short reply that promises a lookup and contains no answer (no figures)."""
-    if not text or len(text.split()) > 25 or re.search(r"\d", text):
+def announces_pending_action(text: str, tool_names: set[str] | None = None) -> bool:
+    """A reply that announces or promises an action instead of taking it: a short "let me
+    check" with no answer (no figures), a promise ("I'll add you…", "someone will call you"),
+    or a tool call written out as text."""
+    if not text:
         return False
-    return _PENDING.search(text) is not None
+    if tool_names and textual_tool_call(text, tool_names):
+        return True
+    if len(text.split()) > 25 or re.search(r"\d", text):
+        return False
+    return _PENDING.search(text) is not None or _PROMISE.search(text) is not None
 
 
 @dataclass
@@ -52,6 +87,7 @@ class FollowThroughGuard:
     tool_count: Callable[[], int]
     trigger: Callable[[str], Any]
     on_triggered: Callable[[str], Any] | None = None
+    tool_names: set[str] | None = None
     _tools_at_turn_start: int = 0
     _used_this_turn: bool = False
 
@@ -64,7 +100,7 @@ class FollowThroughGuard:
             return False
         if self.tool_count() != self._tools_at_turn_start:
             return False
-        if not announces_pending_action(text):
+        if not announces_pending_action(text, self.tool_names):
             return False
         self._used_this_turn = True
         if self.on_triggered is not None:

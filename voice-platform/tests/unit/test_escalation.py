@@ -20,6 +20,7 @@ from voice_platform.runtime.escalation import handoff_summary, wants_human
         "Est-ce que je peux parler à quelqu'un?",
         "Je veux parler à une vraie personne",
         "Passez-moi la réception",
+        "I don't want to talk to a robot. Get me a real person please.",  # benchmark case
     ],
 )
 def test_detects_explicit_requests(text: str) -> None:

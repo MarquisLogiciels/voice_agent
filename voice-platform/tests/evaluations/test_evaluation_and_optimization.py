@@ -138,7 +138,13 @@ async def test_optimizer_rejects_regressions(library: list[Scenario]) -> None:
     subset = [s for s in library if s.id in ("book-simple", "wants-human")]
     runner = BenchmarkRunner(agent_llm_factory=model_factory)
     opt = Optimizer(runner, [Saboteur()], max_iterations=1)
-    outcome = await opt.run(eval_config(), subset)
+    # Transfers must depend on the model for the saboteur to cause a regression; with
+    # transfer_on_request the runtime transfers explicit requests itself.
+    base = eval_config()
+    base = base.model_copy(
+        update={"transfer": base.transfer.model_copy(update={"transfer_on_request": False})}
+    )
+    outcome = await opt.run(base, subset)
     assert outcome.decision == "no_improvement"
     it = outcome.iterations[0]
     assert not it.kept and it.decision is not None

@@ -75,6 +75,7 @@ class RuntimeSession:
     silence: SilencePolicy | None
     duration: DurationPolicy | None
     end_reason: str | None = None
+    followthrough: FollowThroughGuard | None = None
 
     def start_policies(self) -> None:
         if self.silence is not None:
@@ -212,6 +213,7 @@ def build_runtime_session(
             tool_count=lambda: env.state.tool_calls,
             trigger=lambda instructions: session.generate_reply(instructions=instructions),
             on_triggered=lambda text: recorder.add({"type": "follow_through", "reply": text}),
+            tool_names={t.llm_name.lower() for t in executor.tools.values()},
         )
         if cfg.conversation.follow_through and cfg.tools.enabled
         else None
@@ -250,6 +252,7 @@ def build_runtime_session(
         pipeline=built,
         silence=None,
         duration=None,
+        followthrough=guard,
     )
 
     async def end_call(reason: str) -> None:

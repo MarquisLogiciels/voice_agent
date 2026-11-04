@@ -28,9 +28,17 @@ _FR = re.compile(
     r"|\bvrai(e)?\s+personne\b",
     re.IGNORECASE,
 )
+_PERSON = (
+    r"(a|an|the|some|any|your)?\s*(real\s+|live\s+|actual\s+)?(person|human|someone|somebody|"
+    r"representative|rep|agent|operator|receptionist|staff|employee|people)"
+)
+# Negation only counts when it is about talking to a *person* ("I don't want to talk to a
+# person"); "I don't want to talk to a robot, get me a real person" is a request (benchmark
+# scenario wants-human failed 0/2 on the first version of this rule).
 _NEGATED = re.compile(
     r"\b(don'?t|do not|no need to|never|not)\s+(want|need|wish)?\s*(to\s+)?"
-    r"(speak|talk|transfer|connect)\b|\bne\s+(veux|souhaite)\s+pas\b",
+    r"(speak|talk|be transferred|transfer|connect)\s+(to|with)\s+" + _PERSON + r"\b"
+    r"|\bne\s+(veux|souhaite)\s+pas\s+(parler|être transféré)",
     re.IGNORECASE,
 )
 
