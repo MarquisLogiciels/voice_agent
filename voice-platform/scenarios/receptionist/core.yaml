@@ -1,0 +1,138 @@
+# Core receptionist regression suite. Scripted callers: deterministic and model-agnostic.
+# Dates are pinned with `now` so availability is reproducible (Mon 2030-01-07, 08:00 Toronto).
+scenarios:
+  - id: book-simple
+    name: Caller books a cleaning
+    tags: [booking, english]
+    critical: true
+    now: "2030-01-07T13:00:00+00:00"
+    persona: {name: Ana Roy, description: Existing patient wanting a cleaning}
+    script:
+      - say: "Hi, I'd like to book a cleaning on 2030-01-08 in the morning."
+        expect_agent: ["\\b(9|nine|10|ten|11|eleven)\\b", "available|opening|slot"]
+      - say: "The first one works. My name is Ana Roy."
+      - say: "Yes, that's correct."
+    expectations:
+      tools:
+        - {name: check_availability, args_subset: {date: "2030-01-08"}}
+        - {name: book_appointment, max_calls: 1}
+      state: {appointments: 1, appointment_attendee_contains: "Ana"}
+
+  - id: book-incomplete-info
+    name: Caller gives no date at first
+    tags: [booking, clarification]
+    now: "2030-01-07T13:00:00+00:00"
+    script:
+      - say: "I need an appointment."
+        expect_agent: ["\\?"]
+      - say: "Tomorrow afternoon, 2030-01-08, for a checkup."
+      - say: "The first time is fine. I'm Marc Dubois."
+      - say: "Yes please."
+    expectations:
+      tools:
+        - {name: check_availability}
+        - {name: book_appointment, max_calls: 1}
+      state: {appointments: 1}
+
+  - id: book-change-mind
+    name: Caller changes their mind before confirming
+    tags: [booking, change-of-mind]
+    critical: true
+    now: "2030-01-07T13:00:00+00:00"
+    script:
+      - say: "Can I book a cleaning on 2030-01-08?"
+      - say: "Actually no, I changed my mind, I'll call back later. Don't book anything."
+    expectations:
+      forbidden_tools: [book_appointment]
+      state: {appointments: 0}
+
+  - id: slot-taken
+    name: Requested slot is already booked
+    tags: [booking, conflict]
+    now: "2030-01-07T13:00:00+00:00"
+    sandbox:
+      busy:
+        - {start: "2030-01-08T14:00:00+00:00", end: "2030-01-08T22:00:00+00:00"}
+    script:
+      - say: "I want a cleaning on 2030-01-08."
+      - say: "Then the first time you have. I'm Ana Roy."
+      - say: "Yes."
+    expectations:
+      tools: [{name: check_availability}]
+      state: {appointments: 0}
+      agent_must_not_mention: ["you're (all )?booked"]
+
+  - id: wants-human
+    name: Caller asks for a person
+    tags: [transfer]
+    critical: true
+    persona: {mood: hurried}
+    script:
+      - say: "I don't want to talk to a robot. Get me a real person please."
+    expectations:
+      tools: [{name: transfer_to_human}]
+      transfer: true
+
+  - id: transfer-busy-fallback
+    name: Front desk busy, fallback answers
+    tags: [transfer, failure]
+    transfer_sim: {outcomes: {front: busy}}
+    script:
+      - say: "Can I speak with someone at the front desk?"
+    expectations:
+      tools: [{name: transfer_to_human}]
+      transfer: true
+      transfer_destination: manager
+
+  - id: crm-down
+    name: CRM unavailable during lookup
+    tags: [failure, crm]
+    sandbox:
+      faults: {find_contacts_by_phone: {error: unavailable}}
+    script:
+      - say: "Hi, do you have my file? I'm calling about my account."
+    expectations:
+      no_false_success_claims: true
+      agent_must_not_mention: ["I found your (file|account|record)"]
+
+  - id: calendar-timeout
+    name: Calendar times out while checking availability
+    tags: [failure, calendar]
+    now: "2030-01-07T13:00:00+00:00"
+    sandbox:
+      faults: {busy_intervals: {delay_s: 12}}
+    script:
+      - say: "Do you have anything on 2030-01-08?"
+    expectations:
+      state: {appointments: 0}
+      agent_must_not_mention: ["you're (all )?booked"]
+
+  - id: french-booking
+    name: Appel en français (Québec)
+    tags: [booking, french]
+    language: fr
+    now: "2030-01-07T13:00:00+00:00"
+    persona: {name: Julie Tremblay, language: fr-CA}
+    script:
+      - say: "Bonjour, je voudrais un rendez-vous pour un nettoyage le 2030-01-08 en matinée."
+      - say: "La première heure me convient. Je m'appelle Julie Tremblay."
+      - say: "Oui, c'est exact."
+    expectations:
+      tools:
+        - {name: check_availability, args_subset: {date: "2030-01-08"}}
+        - {name: book_appointment, max_calls: 1}
+      state: {appointments: 1, appointment_attendee_contains: "Julie"}
+
+  - id: faq-price
+    name: Caller asks a price question
+    tags: [knowledge]
+    knowledge_documents:
+      Price list: |
+        ## Prices
+        A routine cleaning costs 120 dollars. Whitening costs 350 dollars.
+    script:
+      - say: "How much is a cleaning?"
+    expectations:
+      tools: [{name: search_knowledge_base}]
+      agent_must_mention: ["120"]
+      agent_must_not_mention: ["\\b(99|150|200)\\b"]
