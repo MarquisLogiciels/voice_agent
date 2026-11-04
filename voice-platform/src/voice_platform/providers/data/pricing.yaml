@@ -1,0 +1,49 @@
+# Approximate list prices used ONLY for cost estimates on dashboards and evaluation reports.
+# They are not billing data. Verify against each provider's current pricing page and your
+# negotiated rates, then override by setting VP_PRICING_FILE to a copy of this file.
+# Keys: "<kind>/<provider>" → model (or "*" default) → price fields (USD).
+as_of: "2025-06"
+prices:
+  stt/deepgram:
+    "*": {usd_per_audio_minute: 0.0077}
+  stt/assemblyai:
+    "*": {usd_per_audio_minute: 0.0025}
+  stt/openai:
+    "*": {usd_per_audio_minute: 0.006}
+  stt/google:
+    "*": {usd_per_audio_minute: 0.016}
+  stt/cartesia:
+    "*": {usd_per_audio_minute: 0.0022}
+  stt/livekit:
+    "*": {usd_per_audio_minute: 0.0077}
+  llm/openai:
+    gpt-4.1: {usd_per_1m_input_tokens: 2.0, usd_per_1m_output_tokens: 8.0}
+    gpt-4.1-mini: {usd_per_1m_input_tokens: 0.40, usd_per_1m_output_tokens: 1.60}
+    gpt-4.1-nano: {usd_per_1m_input_tokens: 0.10, usd_per_1m_output_tokens: 0.40}
+    gpt-4o-mini: {usd_per_1m_input_tokens: 0.15, usd_per_1m_output_tokens: 0.60}
+    "*": {usd_per_1m_input_tokens: 2.0, usd_per_1m_output_tokens: 8.0}
+  llm/anthropic:
+    claude-haiku-4-5: {usd_per_1m_input_tokens: 1.0, usd_per_1m_output_tokens: 5.0}
+    claude-sonnet-4-6: {usd_per_1m_input_tokens: 3.0, usd_per_1m_output_tokens: 15.0}
+    "*": {usd_per_1m_input_tokens: 3.0, usd_per_1m_output_tokens: 15.0}
+  llm/google:
+    gemini-2.5-flash: {usd_per_1m_input_tokens: 0.30, usd_per_1m_output_tokens: 2.50}
+    "*": {usd_per_1m_input_tokens: 0.30, usd_per_1m_output_tokens: 2.50}
+  llm/livekit:
+    "*": {usd_per_1m_input_tokens: 0.40, usd_per_1m_output_tokens: 1.60}
+  tts/elevenlabs:
+    "*": {usd_per_1k_chars: 0.05}
+  tts/cartesia:
+    "*": {usd_per_1k_chars: 0.03}
+  tts/deepgram:
+    "*": {usd_per_1k_chars: 0.030}
+  tts/openai:
+    "*": {usd_per_1k_chars: 0.015}
+  tts/google:
+    "*": {usd_per_1k_chars: 0.016}
+  tts/livekit:
+    "*": {usd_per_1k_chars: 0.05}
+  realtime/openai-realtime:
+    "*": {usd_per_1m_input_tokens: 32.0, usd_per_1m_output_tokens: 64.0}
+  realtime/google-realtime:
+    "*": {usd_per_1m_input_tokens: 3.0, usd_per_1m_output_tokens: 12.0}
