@@ -133,7 +133,7 @@ def upgrade() -> None:
         BEGIN
             -- elevate visibility for this lookup only, then restore the caller's scope
             PERFORM set_config('app.platform_admin', 'on', true);
-            RETURN QUERY SELECT u.id, u.password_hash, u.disabled, u.is_platform_admin
+            RETURN QUERY SELECT u.id, u.password_hash::text, u.disabled, u.is_platform_admin
             FROM users u WHERE u.email = lower(p_email);
             PERFORM set_config('app.platform_admin', prev, true);
             RETURN;
@@ -148,7 +148,7 @@ def upgrade() -> None:
         BEGIN
             -- elevate visibility for this lookup only, then restore the caller's scope
             PERFORM set_config('app.platform_admin', 'on', true);
-            RETURN QUERY SELECT k.id, k.tenant_id, k.key_hash, k.role, k.expires_at, k.revoked_at
+            RETURN QUERY SELECT k.id, k.tenant_id, k.key_hash::text, k.role::text, k.expires_at, k.revoked_at
             FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
             WHERE k.prefix = p_prefix AND t.status = 'active';
             PERFORM set_config('app.platform_admin', prev, true);
@@ -163,7 +163,7 @@ def upgrade() -> None:
         BEGIN
             -- elevate visibility for this lookup only, then restore the caller's scope
             PERFORM set_config('app.platform_admin', 'on', true);
-            RETURN QUERY SELECT m.tenant_id, m.role, t.slug, t.name, t.status
+            RETURN QUERY SELECT m.tenant_id, m.role::text, t.slug::text, t.name::text, t.status::text
             FROM memberships m JOIN tenants t ON t.id = m.tenant_id
             WHERE m.user_id = p_user;
             PERFORM set_config('app.platform_admin', prev, true);
@@ -178,7 +178,7 @@ def upgrade() -> None:
         BEGIN
             -- elevate visibility for this lookup only, then restore the caller's scope
             PERFORM set_config('app.platform_admin', 'on', true);
-            RETURN QUERY SELECT p.tenant_id, p.agent_id, p.environment, p.id
+            RETURN QUERY SELECT p.tenant_id, p.agent_id, p.environment::text, p.id
             FROM phone_numbers p JOIN tenants t ON t.id = p.tenant_id
             WHERE p.e164 = p_e164 AND p.status = 'active' AND t.status = 'active';
             PERFORM set_config('app.platform_admin', prev, true);

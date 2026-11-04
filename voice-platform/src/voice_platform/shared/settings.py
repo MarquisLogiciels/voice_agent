@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
 
+    # --- evaluation / optimization -------------------------------------------------------
+    # "provider:model" specs; the judge must not be the same model as the agent under test.
+    simulator_llm: str = "openai:gpt-4.1-mini"
+    judge_llm: str = "anthropic:claude-haiku-4-5"
+    optimizer_llm: str | None = None
+    scenario_library_path: str = "scenarios"
+    eval_max_concurrency: int = Field(default=4, ge=1, le=32)
+
     # --- observability ----------------------------------------------------------------------
     otel_exporter_otlp_endpoint: str | None = None
     worker_metrics_port: int = 9464

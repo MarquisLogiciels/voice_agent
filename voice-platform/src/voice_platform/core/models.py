@@ -28,6 +28,9 @@ NAMING = {
 class Base(DeclarativeBase):
     metadata = sa.MetaData(naming_convention=NAMING)
     type_annotation_map = {dict[str, Any]: JSONB, list[Any]: JSONB}
+    # Fetch server-generated columns (timestamps, identities) via RETURNING so they are never
+    # lazy-loaded later (lazy IO is not allowed under asyncio).
+    __mapper_args__ = {"eager_defaults": True}
 
 
 def _uuid_pk() -> Mapped[uuid.UUID]:
