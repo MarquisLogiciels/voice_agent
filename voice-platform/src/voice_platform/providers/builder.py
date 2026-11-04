@@ -148,7 +148,7 @@ class PipelineBuilder:
                 out.tts = self._build_chain(ProviderKind.TTS, pipeline.realtime_tts, ctx, out)
 
         out.turn_detection = self._turn_detection(pipeline, ctx)
-        out.conn_options = self._conn_options(pipeline)
+        out.conn_options = self.session_conn_options(pipeline)
         return out
 
     def _turn_detection(self, pipeline: PipelineConfig, ctx: BuildContext) -> Any:
@@ -158,7 +158,8 @@ class PipelineBuilder:
             return self.registry.create(ProviderKind.TURN_DETECTION, ref, ctx)
         return td.mode.value  # "vad" | "stt" | "realtime_llm" | "manual"
 
-    def _conn_options(self, pipeline: PipelineConfig) -> Any:
+    def session_conn_options(self, pipeline: PipelineConfig) -> Any:
+        """LiveKit SessionConnectOptions from the config's per-provider ConnectionPolicy."""
         from livekit.agents import APIConnectOptions, SessionConnectOptions
 
         def opts(spec: ProviderSpec | None) -> Any:

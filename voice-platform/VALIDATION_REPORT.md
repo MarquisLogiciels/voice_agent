@@ -215,3 +215,42 @@ CI now runs `pip-audit` on the locked third-party set (`uv export --no-emit-loca
 locally on 2026-11-04: 157 packages, **no known vulnerabilities**), GitHub dependency review on
 pull requests (fails on high severity), and a Trivy scan of the built image (critical/high,
 fixed-only). The Trivy step has not been run here (no image build yet at time of writing).
+
+### 3.8 The "100 conversations" degradation and per-host capacity — **analysis + partial measurement**
+
+The mission-1 load test ran 10/50/100 *text* conversations inside **one** event loop and saw
+platform overhead p95 rise to 0.58 s at 100. That set-up does not match production, and the
+lab now proves how production runs:
+
+* **Process model (verified).** `vp-worker start` runs each job in its own process (LiveKit
+  `JobExecutorType.PROCESS`, forkserver). Defect L1 (unpicklable entrypoint) could only exist
+  because of this, and every lab call ran in a separate job pid. One call never shares an event
+  loop with another, so the single-loop curve says nothing about a worker host.
+* **Idle processes.** In production mode LiveKit keeps `num_idle_processes = cpu_count`
+  warm processes (4 on a 4-vCPU host) so calls start without import/VAD-load delay (lab:
+  dispatch → greeting audio 1.2–1.6 s).
+* **Memory per job process (measured).** Importing LiveKit + platform + loading Silero +
+  provider plugins: **≈ 220 MB RSS** before a call (RSS includes shared pages; PSS is lower).
+  `job_memory_warn_mb=700` is set.
+* **CPU / admission (verified behaviour).** LiveKit's default `load_fnc` is whole-host CPU
+  averaged over ~2.5 s with `load_threshold=0.7`; in the lab, CPU inference on the same host
+  made the worker flap to "full capacity" six times per call. LiveKit's published guidance:
+  4 cores / 8 GB per agent server handles **10–25 concurrent jobs**; their reference test ran 30
+  VAD-only sessions at 3.8 cores / 2.8 GB. With ~220 MB per process the platform's memory
+  budget supports ~25 jobs per 8 GB host, CPU being the first limit with Silero VAD per call
+  (and more if the LiveKit turn-detector model or noise cancellation runs on the host).
+* **New capacity risk found: database connections.** Each job process gets its own pool
+  (`db_pool_size ≤ 3`, `db_max_overflow ≤ 2`, `apps/worker/main.py`) → up to **5 connections
+  per call**, i.e. ~125 per fully loaded host plus API/jobs. Three hosts at 25 calls already
+  exceed a `db.t4g.medium` RDS `max_connections` (~400 incl. reserved). Recommendation: put
+  PgBouncer (transaction pooling) or RDS Proxy in front of Postgres and/or lower the per-job
+  pool to 1 + 1. Tenant scoping uses transaction-local `set_config(..., true)`, so transaction
+  pooling is compatible; with asyncpg add `?prepared_statement_cache_size=0` to the URL.
+
+**Recommendation (not a measurement):** size worker hosts at 4 vCPU / 8 GB, start with
+`load_fnc` = active jobs / 15 and `load_threshold` 0.9 (predictable admission instead of
+CPU spikes), keep inference servers off worker hosts, and run a real concurrent-call load test
+(N simulated SIP callers against a staging LiveKit + cloud providers, watching
+`vp_response_latency_seconds` p95, job RSS and DB connections) before choosing the number.
+**Not measured here:** concurrent calls on one worker (this 4-vCPU box is saturated by the
+local LLM alone, so any number would describe Ollama, not the platform).

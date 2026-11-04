@@ -6,6 +6,7 @@ Everything environment-specific (telephony, persistence, ledger, integrations) i
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -134,6 +135,11 @@ def build_runtime_session(
     cfg = resolved.config
     deps.build_ctx.default_language = cfg.language
     built = deps.pipeline_override or deps.builder.build(cfg.pipeline, deps.build_ctx)
+    if deps.pipeline_override is not None and built.conn_options is None:
+        # simulations swap in their own models but keep the agent's timeout/retry policy
+        built = dataclasses.replace(
+            built, conn_options=deps.builder.session_conn_options(cfg.pipeline)
+        )
     for w in built.warnings:
         logger.warning("pipeline warning", extra={"path": w.path, "detail": w.message})
 

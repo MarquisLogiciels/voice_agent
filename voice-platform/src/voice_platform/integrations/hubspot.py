@@ -44,6 +44,14 @@ class HubSpotConfig(BaseModel):
     deal_to_contact_type: int = 3
     lead_to_contact_type: int = 578
     note_to_contact_type: int = 202
+    idempotency_property: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_]{0,99}$",
+        description="Internal name of a single-line text property (create it on deals/leads "
+        "in the portal) that stores the platform's idempotency key. HubSpot has no idempotency "
+        "keys: without this, a create that times out after HubSpot stored it can be "
+        "duplicated by a retry.",
+    )
 
 
 def _check_id(value: str) -> str:
@@ -249,6 +257,14 @@ class HubSpotCRM:
             if self.cfg.lead_pipeline_stage:
                 props["hs_pipeline_stage"] = self.cfg.lead_pipeline_stage
             assoc_type = self.cfg.lead_to_contact_type
+        obj = path.rsplit("/", 1)[-1]
+        key_prop = self.cfg.idempotency_property
+        key = re.sub(r"[^A-Za-z0-9_:\-]", "", idempotency_key)[:200]
+        if key_prop:
+            existing = await self._find_by_key(obj, key_prop, key)
+            if existing is not None:
+                return self._lead(existing, contact_id, data.title)
+            props[key_prop] = key
         body: dict[str, Any] = {"properties": props}
         if contact_id:
             body["associations"] = [
@@ -260,15 +276,38 @@ class HubSpotCRM:
                 }
             ]
         created = await self.http.json("POST", path, json_body=body, operation="leads.create")
-        p = created.get("properties") or {}
+        return self._lead(created, contact_id, data.title)
+
+    def _lead(self, obj: dict[str, Any], contact_id: str | None, title: str) -> Lead:
+        p = obj.get("properties") or {}
         return Lead(
-            id=str(created["id"]),
+            id=str(obj["id"]),
             contact_id=contact_id,
-            title=p.get("dealname") or p.get("hs_lead_name") or data.title,
+            title=p.get("dealname") or p.get("hs_lead_name") or title,
             status=p.get("dealstage") or p.get("hs_pipeline_stage"),
             description=p.get("description"),
             source="hubspot",
         )
+
+    async def _find_by_key(self, obj: str, prop: str, key: str) -> dict[str, Any] | None:
+        """Record created earlier with this idempotency key (a retry after an ambiguous
+        failure). HubSpot search is eventually consistent: a record created seconds ago may
+        not be indexed yet, so this narrows the duplicate window rather than closing it."""
+        data = await self.http.json(
+            "POST",
+            f"/crm/v3/objects/{obj}/search",
+            json_body={
+                "filterGroups": [
+                    {"filters": [{"propertyName": prop, "operator": "EQ", "value": key}]}
+                ],
+                "properties": ["dealname", "dealstage", "hs_lead_name", "hs_pipeline_stage", prop],
+                "limit": 1,
+            },
+            retry_unsafe=True,
+            operation="leads.find_by_key",
+        )
+        results = (data or {}).get("results") or []
+        return dict(results[0]) if results else None
 
     async def update_lead(self, lead_id: str, data: LeadUpdate) -> Lead:
         changes = data.changes()

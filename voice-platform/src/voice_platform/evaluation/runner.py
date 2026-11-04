@@ -123,8 +123,11 @@ class BenchmarkRunner:
         judge: LLMJudge | None = None,
         concurrency: int = 4,
         judge_threshold: float = 3.0,
+        turn_timeout_s: float = 45.0,
     ) -> None:
         self.agent_llm_factory = agent_llm_factory
+        self.turn_timeout_s = turn_timeout_s
+        """Per-turn limit; slow self-hosted models need more than cloud APIs."""
         self.caller_llm = caller_llm
         self.judge = judge
         self.concurrency = concurrency
@@ -142,7 +145,11 @@ class BenchmarkRunner:
         async def one(s: Scenario, rep: int) -> ResultRecord:
             async with sem:
                 sim = await run_scenario(
-                    s, config, agent_llm=self.agent_llm_factory(config), caller_llm=self.caller_llm
+                    s,
+                    config,
+                    agent_llm=self.agent_llm_factory(config),
+                    caller_llm=self.caller_llm,
+                    turn_timeout_s=self.turn_timeout_s,
                 )
                 checks = deterministic_checks(sim)
                 judged = await self.judge.judge(sim) if self.judge is not None else None
