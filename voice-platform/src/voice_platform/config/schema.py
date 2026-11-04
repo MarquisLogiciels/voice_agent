@@ -120,6 +120,7 @@ class PipelineConfig(_Model):
 
 
 class EndpointingConfig(_Model):
+    mode: Literal["fixed", "dynamic"] = "fixed"
     min_delay_s: float = Field(default=0.5, ge=0.0, le=5.0)
     max_delay_s: float = Field(default=3.0, ge=0.2, le=10.0)
 
@@ -132,6 +133,8 @@ class EndpointingConfig(_Model):
 
 class InterruptionConfig(_Model):
     enabled: bool = True
+    mode: Literal["vad", "adaptive"] = Field(
+        default="vad", description="'adaptive' uses LiveKit's hosted interruption model")
     min_duration_s: float = Field(default=0.5, ge=0.0, le=5.0)
     min_words: int = Field(default=0, ge=0, le=10)
     false_interruption_timeout_s: float | None = Field(default=2.0, ge=0.1, le=10.0)
@@ -191,6 +194,8 @@ class ConversationConfig(_Model):
     context: ContextConfig = Field(default_factory=ContextConfig)
     end_call_enabled: bool = True
     post_call_summary: bool = True
+    ivr_detection_outbound: bool = Field(
+        default=True, description="Detect IVR menus/voicemail on outbound calls (LiveKit)")
 
 
 # --------------------------------------------------------------------------------------------
