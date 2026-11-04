@@ -93,11 +93,35 @@ class PlatformAgent(Agent):
                 allow_interruptions=g.allow_interruptions,
             )
 
-    async def _escalate(self, args: dict[str, Any]) -> None:
+    def escalation_args(
+        self, text: str | None, history: list[tuple[str, str]]
+    ) -> dict[str, Any] | None:
+        """Arguments for the deterministic transfer if ``text`` explicitly asks for a person
+        (``transfer.transfer_on_request``), else None. Shared by live calls and simulations."""
+        tcfg = self.config.transfer
+        env = self.executor.env
+        if not (
+            tcfg.enabled
+            and tcfg.transfer_on_request
+            and env.transfer is not None
+            and not env.state.transfer_attempted
+            and wants_human(text)
+        ):
+            return None
+        return {
+            "reason": "The caller asked to speak to a person.",
+            "summary": handoff_summary([*history, ("user", text or "")], env.caller_number),
+        }
+
+    async def escalate(self, args: dict[str, Any]) -> str | None:
+        """Run the transfer; returns what was said to the caller on failure."""
         outcome = await self.executor.execute("transfer_to_human", args)
-        if not outcome.ok:
-            # no LLM turn will relay the outcome, so tell the caller ourselves
-            self.session.say(self.config.transfer.failure_message)
+        if outcome.ok:
+            return None
+        # no LLM turn will relay the outcome, so tell the caller ourselves
+        msg = self.config.transfer.failure_message
+        self.session.say(msg)
+        return msg
 
     async def _prewarm_prompt_cache(self) -> None:
         """Prefill the instructions + tools prefix (lab: first-turn TTFT 13 s → see report)."""
@@ -124,28 +148,16 @@ class PlatformAgent(Agent):
 
     async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: ChatMessage) -> None:
         # 0. Explicit request for a person: transfer deterministically, no LLM turn.
-        tcfg = self.config.transfer
-        env = self.executor.env
-        if (
-            tcfg.enabled
-            and tcfg.transfer_on_request
-            and env.transfer is not None
-            and not env.state.transfer_attempted
-            and wants_human(new_message.text_content)
-        ):
+        lines: list[tuple[str, str]] = [
+            (str(m.role), m.text_content or "")
+            for m in turn_ctx.items
+            if isinstance(m, ChatMessage) and m.role in ("user", "assistant")
+        ]
+        args = self.escalation_args(new_message.text_content, lines)
+        if args is not None:
             from livekit.agents import StopResponse
 
-            lines: list[tuple[str, str]] = [
-                (str(m.role), m.text_content or "")
-                for m in turn_ctx.items
-                if isinstance(m, ChatMessage) and m.role in ("user", "assistant")
-            ]
-            lines.append(("user", new_message.text_content or ""))
-            args = {
-                "reason": "The caller asked to speak to a person.",
-                "summary": handoff_summary(lines, env.caller_number),
-            }
-            self._escalation_task = asyncio.create_task(self._escalate(args))
+            self._escalation_task = asyncio.create_task(self.escalate(args))
             logger.info("caller asked for a person; transferring")
             raise StopResponse()
 

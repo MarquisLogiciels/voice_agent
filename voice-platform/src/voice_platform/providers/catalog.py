@@ -186,6 +186,12 @@ class VoskOptions(_Opts):
         description="100 ms frames quieter than this are sent as digital silence (vosk "
         "transcribes near-silent noise as 'the'); null disables the gate",
     )
+    drop_lone_words: list[str] = Field(
+        default_factory=lambda: ["the"],
+        max_length=20,
+        description="Discard a final transcript consisting only of one of these words "
+        "(the English model's hallucination on steady line noise)",
+    )
 
 
 def _vosk_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
@@ -197,7 +203,12 @@ def _vosk_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
         raise ValueError(
             "vosk url must be a platform-operated endpoint (VP_TRUSTED_PROVIDER_ENDPOINTS)"
         )
-    return VoskSTT(url=url, language=_lang(ref, ctx), noise_gate_dbfs=opts.noise_gate_dbfs)
+    return VoskSTT(
+        url=url,
+        language=_lang(ref, ctx),
+        noise_gate_dbfs=opts.noise_gate_dbfs,
+        drop_lone_words=tuple(opts.drop_lone_words),
+    )
 
 
 # ============================================================================================

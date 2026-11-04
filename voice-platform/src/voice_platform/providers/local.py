@@ -56,6 +56,7 @@ class VoskSTT(stt.STT[Any]):
         sample_rate: int = VOSK_SAMPLE_RATE,
         connect_timeout_s: float = 5.0,
         noise_gate_dbfs: float | None = -60.0,
+        drop_lone_words: tuple[str, ...] = ("the",),
     ) -> None:
         super().__init__(
             capabilities=stt.STTCapabilities(
@@ -66,6 +67,10 @@ class VoskSTT(stt.STT[Any]):
         self._language = language
         self._sample_rate = sample_rate
         self._connect_timeout = connect_timeout_s
+        # a final consisting only of one of these words is discarded: the kaldi English model
+        # outputs a lone "the" for steady line noise (lab: -50 and -35 dBFS noise) and for
+        # silence before speech; it is never a meaningful caller turn on its own
+        self._drop = {w.lower() for w in drop_lone_words}
         # int16 RMS below which a frame is replaced with zeros
         self._gate_rms = None if noise_gate_dbfs is None else 32768 * 10 ** (noise_gate_dbfs / 20)
 
@@ -306,6 +311,8 @@ class VoskStream(stt.RecognizeStream):
                 )
             elif "text" in data:
                 text = data.get("text") or ""
+                if text.strip().lower() in self._vosk._drop:
+                    text = ""
                 if text:
                     self._final(text, data.get("result") or [])
                     if state.get("eof_sent"):

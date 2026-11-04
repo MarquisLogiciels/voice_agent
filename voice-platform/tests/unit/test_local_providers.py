@@ -219,3 +219,24 @@ async def test_vosk_drops_long_silence_and_maps_timestamps() -> None:
     usage = [ev for ev in events if ev.type == stt.SpeechEventType.RECOGNITION_USAGE]
     assert sum(u.recognition_usage.audio_duration for u in usage) == pytest.approx(5.5)
     await runner.cleanup()
+
+
+async def test_vosk_drops_a_lone_hallucinated_word() -> None:
+    from livekit import rtc
+    from livekit.agents import stt
+
+    from voice_platform.providers.local import VoskSTT
+
+    runner, url, _ = await _fake_vosk([{"text": "the"}, {"text": "the clinic is open"}])
+    stream = VoskSTT(url=url).stream()
+    tone = b"\x10\x27" * 1600  # loud enough to pass the noise gate
+    for _ in range(2):
+        stream.push_frame(rtc.AudioFrame(tone, 16000, 1, 1600))
+    stream.end_input()
+    finals = [
+        ev.alternatives[0].text
+        async for ev in stream
+        if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT and ev.alternatives[0].text
+    ]
+    assert finals == ["the clinic is open"]
+    await runner.cleanup()

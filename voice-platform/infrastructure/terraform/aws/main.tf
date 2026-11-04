@@ -10,8 +10,8 @@ locals {
 }
 
 module "vpc" {
-  source               = "terraform-aws-modules/vpc/aws"
-  version              = "~> 5.13"
+  # pinned to an immutable commit (tag v5.13.0) rather than a floating registry version range
+  source               = "git::https://github.com/terraform-aws-modules/terraform-aws-vpc.git?ref=e226cc15a7b8f62fd0e108792fea66fa85bcb4b9"
   name                 = local.name
   cidr                 = var.vpc_cidr
   azs                  = local.azs
@@ -30,9 +30,11 @@ resource "aws_kms_key" "data" {
 
 # --- PostgreSQL -------------------------------------------------------------------------
 resource "aws_security_group" "db" {
-  name   = "${local.name}-db"
-  vpc_id = module.vpc.vpc_id
+  name        = "${local.name}-db"
+  description = "PostgreSQL: reachable only from the application tasks"
+  vpc_id      = module.vpc.vpc_id
   ingress {
+    description     = "PostgreSQL from app tasks"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
@@ -75,18 +77,27 @@ resource "aws_db_instance" "pg" {
   deletion_protection          = var.environment == "prod"
   copy_tags_to_snapshot        = true
   performance_insights_enabled = true
-  db_subnet_group_name         = aws_db_subnet_group.db.name
-  vpc_security_group_ids       = [aws_security_group.db.id]
-  parameter_group_name         = aws_db_parameter_group.pg.name
-  skip_final_snapshot          = var.environment != "prod"
-  final_snapshot_identifier    = "${local.name}-final"
+  #checkov:skip=CKV_AWS_157:Multi-AZ is on for prod (var.environment == "prod"); off in dev/staging for cost
+  #checkov:skip=CKV_AWS_293:deletion protection is on for prod; dev/staging are disposable
+  #checkov:skip=CKV_AWS_161:the app authenticates with a Secrets Manager password over TLS (rds.force_ssl)
+  #checkov:skip=CKV_AWS_118:enhanced monitoring needs a dedicated IAM role; Performance Insights + CloudWatch logs are enabled
+  performance_insights_kms_key_id = aws_kms_key.data.arn
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+  auto_minor_version_upgrade      = true
+  db_subnet_group_name            = aws_db_subnet_group.db.name
+  vpc_security_group_ids          = [aws_security_group.db.id]
+  parameter_group_name            = aws_db_parameter_group.pg.name
+  skip_final_snapshot             = var.environment != "prod"
+  final_snapshot_identifier       = "${local.name}-final"
 }
 
 # --- Redis --------------------------------------------------------------------------------
 resource "aws_security_group" "redis" {
-  name   = "${local.name}-redis"
-  vpc_id = module.vpc.vpc_id
+  name        = "${local.name}-redis"
+  description = "Redis: reachable only from the application tasks"
+  vpc_id      = module.vpc.vpc_id
   ingress {
+    description     = "Redis from app tasks"
     from_port       = 6379
     to_port         = 6379
     protocol        = "tcp"
@@ -107,13 +118,20 @@ resource "aws_elasticache_replication_group" "redis" {
   num_cache_clusters         = var.environment == "prod" ? 2 : 1
   automatic_failover_enabled = var.environment == "prod"
   at_rest_encryption_enabled = true
+  kms_key_id                 = aws_kms_key.data.arn
   transit_encryption_enabled = true
-  subnet_group_name          = aws_elasticache_subnet_group.redis.name
-  security_group_ids         = [aws_security_group.redis.id]
+  #checkov:skip=CKV_AWS_31:TLS in transit is on; access is limited to the app security group (no AUTH token yet, see PRODUCTION_READINESS)
+  #checkov:skip=CKV2_AWS_50:automatic failover with 2 nodes is on for prod only
+  subnet_group_name  = aws_elasticache_subnet_group.redis.name
+  security_group_ids = [aws_security_group.redis.id]
 }
 
 # --- S3: documents + recordings -------------------------------------------------------------
-resource "aws_s3_bucket" "data" { bucket = "${local.name}-data-${data.aws_caller_identity.me.account_id}" }
+resource "aws_s3_bucket" "data" {
+  #checkov:skip=CKV_AWS_144:no cross-region replication on purpose — customer data stays in the chosen (Canadian) region
+  #checkov:skip=CKV2_AWS_62:no event consumers; ingestion is driven by the API
+  bucket = "${local.name}-data-${data.aws_caller_identity.me.account_id}"
+}
 data "aws_caller_identity" "me" {}
 
 resource "aws_s3_bucket_public_access_block" "data" {
@@ -150,6 +168,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
     expiration { days = var.recording_retention_days * 4 }
     noncurrent_version_expiration { noncurrent_days = 30 }
   }
+  rule {
+    id     = "abort-incomplete-uploads"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
+  }
 }
 
 resource "aws_s3_bucket_policy" "tls_only" {
@@ -177,32 +201,42 @@ resource "aws_secretsmanager_secret" "app" {
 
 # --- ECS ----------------------------------------------------------------------------------
 resource "aws_security_group" "alb" {
-  name   = "${local.name}-alb"
-  vpc_id = module.vpc.vpc_id
+  name        = "${local.name}-alb"
+  description = "Public HTTPS load balancer for the API"
+  vpc_id      = module.vpc.vpc_id
   ingress {
+    description = "HTTPS from the internet"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # egress only to the API tasks (separate rule to avoid an SG reference cycle)
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_to_app" {
+  security_group_id            = aws_security_group.alb.id
+  description                  = "ALB to API tasks"
+  ip_protocol                  = "tcp"
+  from_port                    = 8000
+  to_port                      = 8000
+  referenced_security_group_id = aws_security_group.app.id
 }
 
 resource "aws_security_group" "app" {
-  name   = "${local.name}-app"
-  vpc_id = module.vpc.vpc_id
+  #checkov:skip=CKV_AWS_382:tasks call provider APIs, LiveKit (WebRTC/UDP), carriers and tenant CRMs; app-level egress policy (EgressPolicy) restricts destinations
+  name        = "${local.name}-app"
+  description = "API, worker and job tasks"
+  vpc_id      = module.vpc.vpc_id
   ingress {
+    description     = "API from the load balancer"
     from_port       = 8000
     to_port         = 8000
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
   egress {
+    description = "Outbound to providers, LiveKit, carriers and integrations"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -219,6 +253,7 @@ resource "aws_ecs_cluster" "main" {
 }
 
 resource "aws_cloudwatch_log_group" "app" {
+  #checkov:skip=CKV_AWS_338:30-day retention is a data-minimisation choice (logs are redacted but may reference callers)
   name              = "/ecs/${local.name}"
   retention_in_days = 30
   kms_key_id        = aws_kms_key.data.arn
@@ -327,6 +362,10 @@ resource "aws_lb" "api" {
   subnets                    = module.vpc.public_subnets
   security_groups            = [aws_security_group.alb.id]
   drop_invalid_header_fields = true
+  enable_deletion_protection = var.environment == "prod"
+  #checkov:skip=CKV_AWS_150:deletion protection is on for prod
+  #checkov:skip=CKV2_AWS_28:WAF (aws_wafv2_web_acl) recommended before launch; not provisioned here (cost/rule tuning)
+  #checkov:skip=CKV_AWS_91:access logs need a dedicated log bucket; recommended before launch
 }
 
 resource "aws_lb_target_group" "api" {

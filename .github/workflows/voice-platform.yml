@@ -41,6 +41,24 @@ jobs:
             > "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --strict
 
+  terraform:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: voice-platform/infrastructure/terraform/aws}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: {terraform_version: "1.17.1"}
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - name: IaC security scan (checkov)
+        # The four skipped checks are known gaps listed in PRODUCTION_READINESS.md
+        # (S3 access logging, explicit KMS key policy, secret rotation, AZ pinning); any new
+        # finding fails the build. Inline #checkov:skip comments carry their justification.
+        run: |
+          pipx run checkov==3.4.3 -d . --framework terraform --quiet --compact \
+            --skip-check CKV_AWS_18,CKV2_AWS_64,CKV2_AWS_57,CKV_AWS_394
+
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

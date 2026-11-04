@@ -281,15 +281,24 @@ async def run_scenario(
                     break
                 started = time.perf_counter()
                 n_tools = len(rs.recorder.tool_events)
-                result: Any = await asyncio.wait_for(
-                    session.run(user_input=utterance), timeout=turn_timeout_s
-                )
-                texts = [
-                    ev.item.text_content or ""
-                    for ev in result.events
-                    if ev.type == "message" and ev.item.role == "assistant"
-                ]
-                agent_reply = " ".join(t for t in texts if t).strip()
+                history = [(t.role, t.text) for t in _history(turns)]
+                escalation = rs.agent.escalation_args(utterance, history)
+                if escalation is not None:
+                    # same deterministic path a live call takes (no LLM turn)
+                    said = await asyncio.wait_for(
+                        rs.agent.escalate(escalation), timeout=turn_timeout_s
+                    )
+                    agent_reply = said or rs.agent.config.transfer.announce_message
+                else:
+                    result: Any = await asyncio.wait_for(
+                        session.run(user_input=utterance), timeout=turn_timeout_s
+                    )
+                    texts = [
+                        ev.item.text_content or ""
+                        for ev in result.events
+                        if ev.type == "message" and ev.item.role == "assistant"
+                    ]
+                    agent_reply = " ".join(t for t in texts if t).strip()
                 turns.append(
                     TurnRecord(
                         user=utterance,
@@ -319,6 +328,19 @@ async def run_scenario(
         error=error,
         llm_decisions=decisions,
     )
+
+
+@dataclass
+class _Line:
+    role: str
+    text: str
+
+
+def _history(turns: list[TurnRecord]) -> list[_Line]:
+    out: list[_Line] = []
+    for t in turns:
+        out += [_Line("user", t.user), _Line("assistant", t.agent)]
+    return out
 
 
 def tool_calls_summary(result: SimulationResult) -> list[dict[str, Any]]:

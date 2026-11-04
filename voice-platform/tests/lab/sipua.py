@@ -51,11 +51,24 @@ def ulaw_decode(data: bytes) -> np.ndarray:
     return np.where(u & 0x80, -x, x).astype(np.int16)
 
 
+def _lowpass(x: np.ndarray, cutoff: float, taps: int = 101) -> np.ndarray:
+    """Windowed-sinc FIR; ``cutoff`` as a fraction of the sample rate (0–0.5)."""
+    n = np.arange(taps) - (taps - 1) / 2
+    h = 2 * cutoff * np.sinc(2 * cutoff * n) * np.hamming(taps)
+    return np.convolve(x, h / h.sum(), mode="same")
+
+
 def resample(pcm: np.ndarray, src: int, dst: int) -> np.ndarray:
+    """Band-limited resampling (downsampling without a low-pass aliases 4–8 kHz energy into
+    the telephone band and was measurably degrading recognition)."""
     if src == dst or len(pcm) == 0:
         return pcm.astype(np.int16)
-    n = int(len(pcm) * dst / src)
-    return np.interp(np.linspace(0, len(pcm) - 1, n), np.arange(len(pcm)), pcm).astype(np.int16)
+    x = pcm.astype(np.float64)
+    if dst < src:
+        x = _lowpass(x, 0.45 * dst / src)
+    n = int(len(x) * dst / src)
+    y = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)
+    return np.clip(y, -32768, 32767).astype(np.int16)
 
 
 # --------------------------------------------------------------------------------------
