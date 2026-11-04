@@ -105,3 +105,44 @@ working session.
 3. Build the audio simulation harness (custom `AudioInput`/`AudioOutput` around AgentSession).
 4. Review workflow for generated scenarios (approve before they gate promotion).
 5. SSO/MFA; pip-audit in CI; KMS-backed vault keys.
+
+### Session 2 status (validation & hardening)
+
+Evidence for every item: VALIDATION_REPORT.md. Labels as in PRODUCTION_READINESS.md.
+
+**Live validation (self-hosted lab: LiveKit server + SIP, Ollama/Qwen 2.5 3B, Vosk, Pico)**
+- [x] Live WebRTC call through `vp-worker start` (4/4 runs) — tested against a real sandbox
+- [x] SIP: inbound, outbound answered/busy, blind transfer, busy→fallback, no answer, caller
+      hang-up during transfer (7/7) — tested against a real sandbox
+- [x] Audio harness: WER by voice/rate/noise/telephone channel (EN/FR), VAD boundaries,
+      flush latency, false triggers
+- [x] Real-model benchmark + optimizer run (see VALIDATION_REPORT §3.9)
+- [ ] Warm transfer, recording/egress, DTMF, LLM-initiated transfer announcement (F5)
+- [ ] Real carrier + vendor sandboxes (docs/telephony-staging.md checklist)
+
+**Defects fixed this session (found by running, not by reading)**: worker could never start a
+job (L1); NO_PROXY ignored by LiveKit (L2); Vosk ghost words/latency (L3, L4); hours read as
+"nine minus seventeen" (L5); narrated-but-never-made tool calls (L6); wrong dates from the
+model (L7); cold first turn (L8); `transfer_on_request` dead config (T1); transfer tool missing
+(T2); transfers cut by the 8 s tool timeout (T3); inbound greeting on outbound calls (T4);
+docs never committed (root `.gitignore`); transcripts and phone numbers in worker logs;
+erased recordings recoverable from S3 versions; SSE header bypassing the KMS key; ECS killing
+calls 120 s into a deployment.
+
+**Audit fixes**: F1 consent ordering, F2 booking race, F3 IntegrityError→409, F4 bounded
+extraction, F7 http for trusted endpoints; F5/F6 open (F6: model turn detection needs model
+files at build time — the image build downloads them; workers without them fail at session
+build, documented).
+
+**Infrastructure**: terraform fmt/validate + checkov in CI, VPC module pinned to a commit,
+tightened SGs, compose health checks; pip-audit / dependency review / Trivy in CI.
+
+### Next concrete steps
+1. Staging: carrier trunk + LiveKit (Cloud or self-hosted with public IP) + one commercial
+   STT/LLM/TTS set; run docs/telephony-staging.md and the benchmark with a production-grade
+   model and an independent judge.
+2. Build and scan the image in CI; `terraform plan` in a staging account.
+3. PgBouncer/RDS Proxy or smaller per-job DB pools; concurrent-call load test; set `load_fnc`.
+4. Exercise warm transfer, recording egress, DTMF; LLM-initiated transfer announcement (F5).
+5. Dashboard SSO/MFA via the customer IdP; per-session revocation; KMS-backed vault keys.
+6. HubSpot portals: create the idempotency property; Salesforce: External ID field.

@@ -69,8 +69,26 @@ def worker_http_proxy(ws_url: str) -> str | None:
     return os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or None
 
 
+def register_main_process_plugins(enabled: bool) -> bool:
+    """LiveKit's turn detector runs in the worker's shared inference process, whose runners
+    are registered when the plugin module is *imported in the main process* (the same import
+    makes ``download-files`` fetch the model at image build). Importing it lazily inside job
+    processes — as the provider factory does — left the runner unregistered, so model-based
+    turn detection could not work in production."""
+    if not enabled:
+        return False
+    try:
+        import livekit.plugins.turn_detector.english
+        import livekit.plugins.turn_detector.multilingual  # noqa: F401
+    except ImportError:
+        logger.warning("turn-detector plugin not installed; model turn detection unavailable")
+        return False
+    return True
+
+
 def build_server() -> AgentServer:
     settings = get_settings()
+    register_main_process_plugins(settings.worker_turn_detector)
     ws_url = os.environ.get("LIVEKIT_URL") or settings.livekit_url
     server = AgentServer(
         http_proxy=worker_http_proxy(ws_url),

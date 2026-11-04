@@ -147,15 +147,30 @@ class PipelineBuilder:
             if pipeline.realtime_tts is not None:
                 out.tts = self._build_chain(ProviderKind.TTS, pipeline.realtime_tts, ctx, out)
 
-        out.turn_detection = self._turn_detection(pipeline, ctx)
+        out.turn_detection = self._turn_detection(pipeline, ctx, out)
         out.conn_options = self.session_conn_options(pipeline)
         return out
 
-    def _turn_detection(self, pipeline: PipelineConfig, ctx: BuildContext) -> Any:
+    def _turn_detection(
+        self, pipeline: PipelineConfig, ctx: BuildContext, out: BuiltPipeline | None = None
+    ) -> Any:
         td = pipeline.turn_detection
         if td.mode is TurnDetectionMode.MODEL:
             ref = ProviderRef(provider=td.provider or "livekit", model=td.model, options=td.options)
-            return self.registry.create(ProviderKind.TURN_DETECTION, ref, ctx)
+            try:
+                return self.registry.create(ProviderKind.TURN_DETECTION, ref, ctx)
+            except ProviderError as e:
+                # a call must not fail because the turn model is unavailable on this worker
+                fallback = "vad" if pipeline.vad is not None else "stt"
+                if out is not None:
+                    out.warnings.append(
+                        Problem(
+                            "pipeline.turn_detection",
+                            f"{e}; falling back to {fallback} endpointing",
+                            "warning",
+                        )
+                    )
+                return fallback
         return td.mode.value  # "vad" | "stt" | "realtime_llm" | "manual"
 
     def session_conn_options(self, pipeline: PipelineConfig) -> Any:

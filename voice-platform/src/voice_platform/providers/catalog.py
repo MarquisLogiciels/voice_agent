@@ -509,6 +509,8 @@ class TurnDetectorOptions(_Opts):
 
 
 def _livekit_turn_detector(ref: ProviderRef, ctx: BuildContext) -> Any:
+    if str(ctx.env.get("VP_WORKER_TURN_DETECTOR", "true")).lower() in ("0", "false", "no"):
+        raise ValueError("model turn detection is disabled on this worker")
     opts = _opts(TurnDetectorOptions, ref)
     if (ref.model or "multilingual") == "english":
         from livekit.plugins.turn_detector.english import EnglishModel

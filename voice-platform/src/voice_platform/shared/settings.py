@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     livekit_api_key: SecretStr | None = None
     livekit_api_secret: SecretStr | None = None
     agent_dispatch_name: str = "voice-platform"
+    worker_turn_detector: bool = Field(
+        default=True,
+        description="Register LiveKit's turn-detector models in the worker's main process "
+        "(needed for turn_detection mode=model; the model files must be in the image). When "
+        "false, agents configured for model turn detection fall back to VAD endpointing.",
+    )
     livekit_sip_uri: str = ""  # e.g. sip:xxxx.sip.livekit.cloud — used for trunk provisioning
 
     # --- telephony safety -------------------------------------------------------------------

@@ -68,6 +68,8 @@ def worker(
         "VP_WORKER_METRICS_PORT": str(_free_port()),
         "VP_TRUSTED_PROVIDER_ENDPOINTS": f'["{OLLAMA_URL}", "{VOSK_EN}", "{VOSK_FR}"]',
         "VP_TELEPHONY_DRY_RUN": "false",
+        # turn-detector model files need Hugging Face (blocked here); lab agents use VAD
+        "VP_WORKER_TURN_DETECTOR": "false",
         # lab-only numbers; everything else is refused before dialing
         "VP_OUTBOUND_ALLOWED_PREFIXES": '["+1514555"]',
         "LIVEKIT_URL": LIVEKIT_URL,
