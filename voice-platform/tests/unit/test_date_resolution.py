@@ -85,3 +85,22 @@ def test_speakable_hours_orders_and_groups_days() -> None:
         "Saturday: 10 AM to 2 PM; Sunday: closed"
     )
     assert speakable_hours(schedule, "fr-CA").startswith("lundi à vendredi: 9 h à 17 h")
+
+
+def test_outbound_calls_introduce_the_business() -> None:
+    """Lab finding: outbound callees heard 'thanks for calling Maple Dental' and, asked who
+    was calling, the agent answered 'it's a lab call'."""
+    from datetime import UTC, datetime
+
+    from tests.conftest import sample_config
+    from voice_platform.config.schema import AgentConfig
+    from voice_platform.runtime.prompt import build_instructions, outbound_greeting
+
+    cfg = AgentConfig.model_validate(sample_config())
+    assert outbound_greeting(cfg) == "Hi, this is Alex calling from Maple Dental."
+    fr = AgentConfig.model_validate(sample_config(language="fr-CA"))
+    assert outbound_greeting(fr) == "Bonjour, ici Alex de Maple Dental."
+    now = datetime(2026, 11, 4, 15, tzinfo=UTC)
+    out = build_instructions(cfg, now=now, caller_number=None, direction="outbound")
+    assert "outbound call that you placed" in out
+    assert "outbound call" not in build_instructions(cfg, now=now, caller_number=None)

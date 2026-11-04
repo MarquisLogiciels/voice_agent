@@ -78,8 +78,21 @@ def speakable_hours(schedule: dict[str, list[str]], language: str = "en") -> str
     return sep.join(parts)
 
 
+def outbound_greeting(cfg: AgentConfig) -> str:
+    if cfg.greeting.outbound_text:
+        return cfg.greeting.outbound_text
+    if cfg.language.startswith("fr"):
+        return f"Bonjour, ici {cfg.persona.name} de {cfg.business.name}."
+    return f"Hi, this is {cfg.persona.name} calling from {cfg.business.name}."
+
+
 def build_instructions(
-    cfg: AgentConfig, *, now: datetime, caller_number: str | None, caller_context: str | None = None
+    cfg: AgentConfig,
+    *,
+    now: datetime,
+    caller_number: str | None,
+    caller_context: str | None = None,
+    direction: str = "inbound",
 ) -> str:
     tz = ZoneInfo(cfg.business.timezone)
     local_now = now.astimezone(tz)
@@ -92,6 +105,12 @@ def build_instructions(
         f"You are {p.name}, the {p.role} for {b.name}, speaking with callers on the phone. "
         f"Personality: {p.personality}. {p.speaking_style}"
     )
+    if direction == "outbound":
+        parts.append(
+            "This is an outbound call that you placed. The person did not call you: if asked who "
+            f"is calling, say you are {p.name} from {b.name} and briefly state why you are "
+            "calling (see the caller context)."
+        )
     lang_line = f"Speak {_lang_name(cfg.language)} by default."
     if len(langs) > 1:
         lang_line += (

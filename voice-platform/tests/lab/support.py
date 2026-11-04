@@ -114,19 +114,24 @@ def write_wav(path: Path, pcm: np.ndarray, sample_rate: int = SAMPLE_RATE) -> No
 
 
 async def vosk_transcribe(pcm: np.ndarray, url: str = VOSK_EN) -> str:
+    """Transcribe 16 kHz PCM; collects every final result (vosk finalizes at each pause)."""
+    texts: list[str] = []
+
+    def collect(raw: str) -> None:
+        d = json.loads(raw)
+        if d.get("text"):
+            texts.append(d["text"])
+
     async with aiohttp.ClientSession() as s, s.ws_connect(url) as ws:
         await ws.send_str(json.dumps({"config": {"sample_rate": SAMPLE_RATE}}))
         data = pcm.astype(np.int16).tobytes()
         for i in range(0, len(data), 8000):
             await ws.send_bytes(data[i : i + 8000])
-            await ws.receive()
+            collect((await ws.receive()).data)
         await ws.send_str('{"eof" : 1}')
-        texts = []
         async for msg in ws:
-            d = json.loads(msg.data)
-            if d.get("text"):
-                texts.append(d["text"])
-        return " ".join(texts)
+            collect(msg.data)
+    return " ".join(texts)
 
 
 def word_error_rate(reference: str, hypothesis: str) -> float:

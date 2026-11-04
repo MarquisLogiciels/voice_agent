@@ -5,11 +5,17 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
+from typing import Any
 
 from ..shared.errors import ValidationFailedError
 
 MAX_CHARS = 2_000_000
 MAX_PDF_PAGES = 500
+# DOCX is a zip archive: bound what decompression may expand to (zip bombs)
+MAX_DOCX_UNCOMPRESSED = 100 * 1024 * 1024
+MAX_DOCX_RATIO = 200
+MAX_DOCX_ENTRIES = 2_000
+EXTRACT_TIMEOUT_S = 60.0
 
 SUPPORTED_TYPES = {
     "application/pdf": "pdf",
@@ -81,6 +87,7 @@ def extract_text(data: bytes, mime: str) -> str:
         elif kind == "docx":
             import docx
 
+            _check_zip(data)
             document = docx.Document(io.BytesIO(data))
             parts: list[str] = []
             for para in document.paragraphs:
@@ -99,10 +106,74 @@ def extract_text(data: bytes, mime: str) -> str:
         raise
     except Exception as e:
         raise ValidationFailedError(f"could not extract text: {type(e).__name__}") from e
-    cleaned = _clean(text)
+    if len(text) > MAX_CHARS * 2:
+        raise ValidationFailedError("document is too large to index")
+    cleaned = _clean(text)[:MAX_CHARS]
     if not cleaned:
         raise ValidationFailedError("document contains no extractable text (scanned PDF?)")
     return cleaned
+
+
+def _check_zip(data: bytes) -> None:
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            infos = z.infolist()
+    except zipfile.BadZipFile as e:
+        raise ValidationFailedError("not a valid DOCX file") from e
+    total = sum(i.file_size for i in infos)
+    if (
+        len(infos) > MAX_DOCX_ENTRIES
+        or total > MAX_DOCX_UNCOMPRESSED
+        or total > MAX_DOCX_RATIO * max(len(data), 1)
+    ):
+        raise ValidationFailedError("DOCX expands to an unreasonable size")
+
+
+def _extract_child(data: bytes, mime: str, conn: Any) -> None:
+    try:
+        conn.send(("ok", extract_text(data, mime)))
+    except ValidationFailedError as e:
+        conn.send(("invalid", e.message))
+    except Exception as e:  # pragma: no cover - extract_text wraps parser errors
+        conn.send(("invalid", f"could not extract text: {type(e).__name__}"))
+    finally:
+        conn.close()
+
+
+async def extract_text_isolated(
+    data: bytes, mime: str, *, timeout_s: float = EXTRACT_TIMEOUT_S
+) -> str:
+    """Run ``extract_text`` in a separate process with a hard time limit.
+
+    Parsers are CPU-bound and attacker-influenced (uploaded files): running them on the job
+    runner's event loop blocked it, and a thread cannot be stopped when a crafted PDF makes the
+    parser spin. The child is killed on timeout.
+    """
+    import asyncio
+    import multiprocessing
+
+    ctx = multiprocessing.get_context("spawn")
+    parent, child = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_extract_child, args=(data, mime, child), daemon=True)
+    proc.start()
+    child.close()
+    try:
+        ready = await asyncio.to_thread(parent.poll, timeout_s)
+        if not ready:
+            raise ValidationFailedError(f"document took longer than {timeout_s:.0f}s to process")
+        status, payload = parent.recv()
+    except EOFError as e:
+        raise ValidationFailedError("document could not be processed") from e
+    finally:
+        if proc.is_alive():
+            proc.kill()
+        await asyncio.to_thread(proc.join, 5)
+        parent.close()
+    if status != "ok":
+        raise ValidationFailedError(payload)
+    return str(payload)
 
 
 def html_to_text(html: str) -> str:

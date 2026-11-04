@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from sqlalchemy.exc import IntegrityError
 
 from ...observability.metrics import API_LATENCY, API_REQUESTS
 from ...shared.errors import PlatformError, RateLimitedError
@@ -71,6 +72,8 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
         with log_context(request_id=request_id, client_ip=client_ip):
             try:
                 response = await call_next(request)
+            except IntegrityError as e:  # e.g. raised by the commit in a dependency teardown
+                response = _integrity_response(e)
             except Exception:
                 logger.exception("unhandled error")
                 response = JSONResponse(
@@ -107,6 +110,10 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
             status_code=exc.http_status,
             headers=headers,
         )
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
+        return _integrity_response(exc)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -181,4 +188,21 @@ def run() -> None:
         forwarded_allow_ips="*",
         log_config=None,
         timeout_graceful_shutdown=20,
+    )
+
+
+def _integrity_response(exc: IntegrityError) -> JSONResponse:
+    """A constraint violation that slipped past the explicit checks (typically a race between
+    two requests) is a conflict, not a server error. SQL and values are never echoed back."""
+    constraint = getattr(getattr(exc, "orig", None), "constraint_name", None)
+    logger.warning("integrity conflict", extra={"constraint": constraint})
+    return JSONResponse(
+        {
+            "error": {
+                "code": "conflict",
+                "message": "the request conflicts with existing data (it may have just been "
+                "created by another request)",
+            }
+        },
+        status_code=409,
     )

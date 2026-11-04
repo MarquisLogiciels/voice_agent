@@ -298,3 +298,77 @@ async def test_ledger_outage_refuses_side_effects() -> None:
     ex = ToolExecutor.for_agent(_env(_config(), suite, ledger=DeadLedger()))
     out = await ex.execute("create_lead", {"title": "Quote request", "caller_confirmed": True})
     assert not out.ok and out.error == "unavailable" and not suite.state.leads
+
+
+def test_transfer_tool_follows_transfer_config() -> None:
+    """transfer.enabled without listing the tool used to leave the model (and the
+    caller-asks-for-a-person hatch) without a transfer tool while the prompt referenced it."""
+    from voice_platform.tools.executor import ToolExecutor
+
+    dest = {"name": "desk", "phone_number": "+15145550177"}
+    on = _config(transfer={"enabled": True, "destinations": [dest]})
+    off = _config()
+    suite = SandboxSuite()
+    assert "transfer_to_human" in ToolExecutor.for_agent(_env(on, suite)).tools
+    assert "transfer_to_human" not in ToolExecutor.for_agent(_env(off, suite)).tools
+
+
+async def test_transfer_is_not_cut_off_by_the_generic_tool_timeout() -> None:
+    import asyncio
+
+    from voice_platform.tools.executor import ToolExecutor
+    from voice_platform.tools.interfaces import TransferResult
+
+    class SlowTransfer:
+        def destinations(self) -> list[Any]:
+            return list(cfg.transfer.destinations)
+
+        async def transfer(self, *, reason: str, destination: str | None, summary: str) -> Any:
+            await asyncio.sleep(0.3)  # rings longer than tools.timeout_s
+            return TransferResult(True, "completed", "desk", "blind", "transferred")
+
+    dest = {"name": "desk", "phone_number": "+15145550177", "ringing_timeout_s": 20}
+    cfg = _config(
+        transfer={"enabled": True, "destinations": [dest]}, tools={"enabled": [], "timeout_s": 0.1}
+    )
+    env = _env(cfg, SandboxSuite(), transfer=SlowTransfer())
+    out = await ToolExecutor.for_agent(env).execute(
+        "transfer_to_human", {"reason": "asked for a person", "summary": "Caller wants a human."}
+    )
+    assert out.ok, out
+
+
+async def test_concurrent_bookings_for_the_same_slot_leave_exactly_one() -> None:
+    """Audit F2: two calls both passed the availability re-check and both booked. Google
+    Calendar accepts overlapping events, so the calendar itself does not prevent it."""
+    import asyncio
+
+    class GoogleLikeCalendar(SandboxSuite):
+        async def create_appointment(self, data: Any, *, idempotency_key: str) -> Appointment:
+            await asyncio.sleep(0.2)  # slow insert: both callers are past the re-check
+            appt = Appointment(
+                id=self._id("appt"),
+                start=data.start,
+                end=data.end,
+                title=data.title,
+                attendee_name=data.attendee_name,
+                attendee_phone=data.attendee_phone,
+                source="google-like",
+            )
+            self._s.state.appointments.append(appt)
+            return appt
+
+    suite = GoogleLikeCalendar()
+    cfg = _config()
+    a = ToolExecutor.for_agent(_env(cfg, suite))
+    b = ToolExecutor.for_agent(ToolEnv(**{**_env(cfg, suite).__dict__, "conversation_id": "c2"}))
+    args = {"start": "2030-01-07T09:00:00-05:00", "reason": "Cleaning", "caller_confirmed": True}
+    r1, r2 = await asyncio.gather(
+        a.execute("book_appointment", {**args, "attendee_name": "Ana Roy"}),
+        b.execute("book_appointment", {**args, "attendee_name": "Marc Dubois"}),
+    )
+    assert sorted([r1.ok, r2.ok]) == [False, True], (r1, r2)
+    loser = r1 if not r1.ok else r2
+    assert loser.error == "slot_unavailable"
+    live = [x for x in suite.state.appointments if x.status != "cancelled"]
+    assert len(live) == 1  # the loser cancelled its own event

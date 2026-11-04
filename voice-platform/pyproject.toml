@@ -67,6 +67,8 @@ dev = [
     "boto3-stubs[s3]",
     "moto[s3]>=5",
     "import-linter>=2.0",
+    "hubspot-api-client>=12",
+    "google-api-python-client>=2.150",
 ]
 
 [build-system]

@@ -87,7 +87,12 @@ class ToolExecutor:
     def for_agent(cls, env: ToolEnv) -> ToolExecutor:
         cfg = env.config.tools
         tools: dict[str, RegisteredTool] = {}
-        for name in cfg.enabled:
+        names = list(cfg.enabled)
+        if env.config.transfer.enabled and "transfer_to_human" not in names:
+            # transfers configured ⇒ the transfer tool exists (the prompt tells the model to use
+            # it, and the caller-asks-for-a-person escape hatch calls it)
+            names.append("transfer_to_human")
+        for name in names:
             if name == "end_call":
                 continue  # provided by LiveKit's EndCallTool in the runtime
             if name.startswith("custom."):
@@ -286,7 +291,7 @@ class ToolExecutor:
                 coro = adapter.execute(tool.custom_target[1], canonical)
             else:
                 coro = spec.handler(env, args)
-            data = await asyncio.wait_for(coro, timeout=env.config.tools.timeout_s)
+            data = await asyncio.wait_for(coro, timeout=spec.time_budget(env.config))
             outcome = ToolOutcome(ok=True, data=data, message=_success_hint(spec))
         except ToolRefusal as e:
             outcome = ToolOutcome(ok=False, error=e.code, message=e.message)

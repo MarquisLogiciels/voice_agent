@@ -27,7 +27,7 @@ from ..tools.ledger import InMemoryLedger, ToolLedger
 from .agent import PlatformAgent
 from .followthrough import FollowThroughGuard
 from .policies import DurationPolicy, SilencePolicy
-from .prompt import build_instructions
+from .prompt import build_instructions, outbound_greeting
 from .recorder import CallRecorder, ConversationSink, MemorySink
 
 logger = get_logger(__name__)
@@ -182,7 +182,11 @@ def build_runtime_session(
         extra_tools.append(deps.end_call_tool_factory())
 
     instructions = build_instructions(
-        cfg, now=deps.clock(), caller_number=call.caller_number, caller_context=call.caller_context
+        cfg,
+        now=deps.clock(),
+        caller_number=call.caller_number,
+        caller_context=call.caller_context,
+        direction=call.direction,
     )
     agent = PlatformAgent(
         config=cfg,
@@ -190,6 +194,7 @@ def build_runtime_session(
         executor=executor,
         extra_tools=extra_tools,
         knowledge=deps.knowledge,
+        greeting_text=outbound_greeting(cfg) if call.direction == "outbound" else None,
         announcements=[cfg.recording.consent_announcement]
         if cfg.recording.enabled and cfg.recording.consent_required
         else [],

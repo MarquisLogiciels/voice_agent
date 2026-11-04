@@ -477,3 +477,34 @@ async def test_scenario_generation_and_data_subject_requests(api: Any, db: Any) 
         await api.get(f"{base}/data-subjects/export?phone=5145550142", headers=H(owner))
     ).json()
     assert again["conversations"] == []
+
+
+async def test_racing_duplicate_creates_are_conflicts_not_server_errors(api: Any, db: Any) -> None:
+    """Audit F3: both requests pass the explicit duplicate check; the unique constraint then
+    fires on one of them and used to surface as HTTP 500."""
+    import asyncio
+
+    import sqlalchemy.exc
+
+    admin = await _admin_token(api, db)
+    tid, owner = await _tenant_with_owner(api, admin)
+    number = f"+1514556{uuid.uuid4().int % 10000:04d}"
+    r1, r2 = await asyncio.gather(
+        *(
+            api.post(f"/v1/tenants/{tid}/phone-numbers", headers=H(owner), json={"e164": number})
+            for _ in range(2)
+        )
+    )
+    assert sorted([r1.status_code, r2.status_code]) == [201, 409], (r1.text, r2.text)
+
+    app = api._transport.app  # a constraint error raised anywhere maps to 409, without SQL
+
+    @app.get("/__integrity")
+    async def boom() -> None:
+        raise sqlalchemy.exc.IntegrityError(
+            "INSERT INTO phone_numbers ...", {"e164": number}, Exception("duplicate key")
+        )
+
+    r = await api.get("/__integrity")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "conflict"
+    assert "INSERT" not in r.text and number not in r.text

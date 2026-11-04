@@ -13,6 +13,8 @@ from voice_platform.runtime.followthrough import FollowThroughGuard, announces_p
         ("I'll check the availability for next Monday. Hold please.", True),
         ("Let me check our schedule for you, one moment.", True),
         ("Un instant, je vérifie les disponibilités.", True),
+        ("Sure, let me transfer you to someone who can help.", True),
+        ("Je vous transfère à un collègue.", True),
         ("We open at 9 on Monday.", False),  # an answer, not a promise
         ("Let me check... we have 9:30 and 10:00 available.", False),  # contains the answer
         ("Sure! What day works best for you?", False),

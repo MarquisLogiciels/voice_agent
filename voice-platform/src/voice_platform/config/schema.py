@@ -175,6 +175,11 @@ class ContextConfig(_Model):
 class GreetingConfig(_Model):
     mode: Literal["say", "generate", "none"] = "say"
     text: str = ""
+    outbound_text: str | None = Field(
+        default=None,
+        description="Said when the agent places the call (text is written for inbound "
+        "callers). Default: 'Hi, this is <persona> calling from <business>.'",
+    )
     allow_interruptions: bool = True
 
     @model_validator(mode="after")

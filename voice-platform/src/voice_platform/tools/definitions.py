@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from ..config.schema import AgentConfig
 from ..integrations.base import (
     AppointmentInput,
     ContactInput,
@@ -71,6 +72,11 @@ class ToolSpec:
     consequential: bool = False
     dedupe: bool = False
     """Identical calls within a conversation replay the first result (idempotency)."""
+    timeout: Callable[[AgentConfig], float] | None = None
+    """Per-tool time budget; defaults to ``tools.timeout_s``."""
+
+    def time_budget(self, config: AgentConfig) -> float:
+        return self.timeout(config) if self.timeout is not None else config.tools.timeout_s
 
     def llm_schema(
         self, description: str | None = None, *, require_confirmation: bool = False
@@ -452,6 +458,27 @@ async def book_appointment(env: ToolEnv, a: BookAppointmentArgs) -> dict[str, An
         ),
         idempotency_key=f"{env.conversation_id}:book:{start.isoformat()}",
     )
+    # Check-then-insert race: two calls can both pass the re-check above. Verify after the
+    # insert; if another live appointment overlaps, exactly one survives — the smallest id, so
+    # every racer computes the same winner — and the others cancel their own booking.
+    try:
+        around = await cal.list_appointments(
+            start - timedelta(minutes=1), end + timedelta(minutes=1)
+        )
+    except IntegrationError:
+        around = []  # cannot verify; keep the booking rather than cancel blindly
+    rivals = [
+        x.id
+        for x in around
+        if x.id != appt.id and x.status != "cancelled" and x.start < end and x.end > start
+    ]
+    if rivals and min([appt.id, *rivals]) != appt.id:
+        await cal.cancel_appointment(appt.id)
+        raise ToolRefusal(
+            "slot_unavailable",
+            "That slot was just taken by another caller. Call check_availability again and "
+            "offer other times.",
+        )
     return {
         "appointment_id": appt.id,
         "start": appt.start.isoformat(),
@@ -516,6 +543,14 @@ class TransferArgs(_Args):
         "the human: who is calling, what they need, what was done",
     )
     destination: str | None = Field(default=None, description="Destination name, if known")
+
+
+def transfer_time_budget(config: AgentConfig) -> float:
+    """A transfer legitimately takes the announcement plus ringing every destination in the
+    fallback chain. Lab finding: under the generic 8 s tool timeout the tool reported failure
+    (and the agent said nobody was available) while the SIP transfer was still ringing."""
+    ringing = sum(d.ringing_timeout_s + 5 for d in config.transfer.destinations)
+    return min(30 + ringing, 600)
 
 
 async def transfer_to_human(env: ToolEnv, a: TransferArgs) -> dict[str, Any]:
@@ -691,6 +726,7 @@ CATALOG: dict[str, ToolSpec] = {
             "transfer",
             consequential=True,
             dedupe=True,
+            timeout=transfer_time_budget,
         ),
         ToolSpec(
             "send_sms",

@@ -19,7 +19,7 @@ from ..shared.errors import NotFoundError, ValidationFailedError
 from ..shared.logging import get_logger
 from .chunking import chunk_text
 from .embeddings import Embedder, build_embedder, tokens
-from .extract import extract_text, sniff_mime
+from .extract import extract_text_isolated, sniff_mime
 from .types import KnowledgeHit
 
 logger = get_logger(__name__)
@@ -188,7 +188,7 @@ class KnowledgeService:
         assert blob_key is not None
         try:
             data = await self.blobs.get(blob_key)
-            text = extract_text(data, mime)
+            text = await extract_text_isolated(data, mime)
             chunks = chunk_text(text, size=chunk_size, overlap=overlap)
             vectors = await embedder.embed([c.content for c in chunks])
         except Exception as e:

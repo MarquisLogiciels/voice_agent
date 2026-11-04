@@ -24,6 +24,8 @@ _PENDING = re.compile(
     r"|i will (check|look|see|find|verify|search)"
     r"|i'm (checking|looking)|i am (checking|looking)"
     r"|one moment|hold on|hold,? please|please hold|bear with me|just a (moment|sec|second)"
+    r"|(let me|i'?ll|i will|i'm going to) (transfer|connect|put) you"
+    r"|je vous (transfère|transfere|mets en relation|passe)"
     r"|je (vais )?(vérifie|vérifier|regarde|regarder)|laissez-moi (vérifier|regarder)"
     r"|un (instant|moment)|je consulte)\b",
     re.IGNORECASE,
