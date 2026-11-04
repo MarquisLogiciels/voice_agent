@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..providers.pricing import load_pricing, pricing_as_of
+from .pricing import load_pricing, pricing_as_of
 
 
 @dataclass
@@ -30,13 +30,17 @@ class Usage:
         self._add(self.tts_chars, provider_key, chars)
 
     def as_dict(self) -> dict[str, Any]:
-        return {"stt_audio_s": self.stt_audio_s, "llm_input_tokens": self.llm_input_tokens,
-                "llm_output_tokens": self.llm_output_tokens, "tts_chars": self.tts_chars}
+        return {
+            "stt_audio_s": self.stt_audio_s,
+            "llm_input_tokens": self.llm_input_tokens,
+            "llm_output_tokens": self.llm_output_tokens,
+            "tts_chars": self.tts_chars,
+        }
 
 
 def _price(provider_key: str) -> Any:
     # provider_key format: "<kind>:<provider>:<model>"
-    kind, provider, model = (provider_key.split(":") + ["-", "-"])[:3]
+    kind, provider, model = [*provider_key.split(":"), "-", "-"][:3]
     table = load_pricing().get(f"{kind}/{provider}", {})
     return table.get(model) or table.get("*")
 
@@ -53,9 +57,14 @@ def estimate_cost(usage: Usage) -> dict[str, Any]:
     for key in set(usage.llm_input_tokens) | set(usage.llm_output_tokens):
         p = _price(key)
         if p and p.usd_per_1m_input_tokens is not None:
-            lines[key] = lines.get(key, 0) + (
-                usage.llm_input_tokens.get(key, 0) * p.usd_per_1m_input_tokens
-                + usage.llm_output_tokens.get(key, 0) * (p.usd_per_1m_output_tokens or 0)) / 1e6
+            lines[key] = (
+                lines.get(key, 0)
+                + (
+                    usage.llm_input_tokens.get(key, 0) * p.usd_per_1m_input_tokens
+                    + usage.llm_output_tokens.get(key, 0) * (p.usd_per_1m_output_tokens or 0)
+                )
+                / 1e6
+            )
         else:
             unknown.append(key)
     for key, chars in usage.tts_chars.items():

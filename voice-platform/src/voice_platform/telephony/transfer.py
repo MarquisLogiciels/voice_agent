@@ -97,16 +97,23 @@ class TransferManager:
             visit(start)
         return out
 
-    async def transfer(self, *, reason: str, destination: str | None, summary: str
-                       ) -> TransferResult:
+    async def transfer(
+        self, *, reason: str, destination: str | None, summary: str
+    ) -> TransferResult:
         if self.completed is not None and self.completed.ok:
             return self.completed
         attempts: list[dict[str, Any]] = []
         plan = self.plan(destination)
         if not plan:
             TRANSFERS.labels("none", "unavailable").inc()
-            return TransferResult(ok=False, status="unavailable", destination=None, mode=None,
-                                  message=self.cfg.failure_message, attempts=attempts)
+            return TransferResult(
+                ok=False,
+                status="unavailable",
+                destination=None,
+                mode=None,
+                message=self.cfg.failure_message,
+                attempts=attempts,
+            )
         if self.announce is not None:
             try:
                 await self.announce(self.cfg.announce_message)
@@ -117,20 +124,36 @@ class TransferManager:
         for dest in plan:
             started = time.monotonic()
             status, error = await self._attempt(dest, summary)
-            attempt = {"destination": dest.name, "mode": dest.mode.value, "status": status,
-                       "error": error, "duration_s": round(time.monotonic() - started, 2)}
+            attempt = {
+                "destination": dest.name,
+                "mode": dest.mode.value,
+                "status": status,
+                "error": error,
+                "duration_s": round(time.monotonic() - started, 2),
+            }
             attempts.append(attempt)
             await self._emit({"type": "transfer_attempt", "reason": reason, **attempt})
             TRANSFERS.labels(dest.mode.value, status).inc()
             if status in ("completed", "dry_run"):
-                result = TransferResult(ok=True, status=status, destination=dest.name,
-                                        mode=dest.mode.value, message="transferred",
-                                        attempts=attempts)
+                result = TransferResult(
+                    ok=True,
+                    status=status,
+                    destination=dest.name,
+                    mode=dest.mode.value,
+                    message="transferred",
+                    attempts=attempts,
+                )
                 self.completed = result
                 return result
             last_status = status
-        return TransferResult(ok=False, status=last_status, destination=None, mode=None,
-                              message=self.cfg.failure_message, attempts=attempts)
+        return TransferResult(
+            ok=False,
+            status=last_status,
+            destination=None,
+            mode=None,
+            message=self.cfg.failure_message,
+            attempts=attempts,
+        )
 
     async def _attempt(self, dest: TransferDestination, summary: str) -> tuple[str, str | None]:
         target = dest.phone_number or dest.sip_uri or ""
@@ -142,8 +165,9 @@ class TransferManager:
                 return "rejected", "destination not allowed by outbound policy"
             target = e164
         if self.dry_run:
-            logger.info("dry-run transfer", extra={"destination": dest.name,
-                                                   "target": mask_phone(target)})
+            logger.info(
+                "dry-run transfer", extra={"destination": dest.name, "target": mask_phone(target)}
+            )
             return "dry_run", None
         try:
             if dest.mode is TransferMode.WARM:
@@ -154,20 +178,30 @@ class TransferManager:
                 if self.transport is None or not self.caller_identity:
                     return "failed", "no telephony transport for this call"
                 await self.transport.blind_transfer(
-                    room_name=self.room_name, participant_identity=self.caller_identity,
-                    to_uri=to_sip_uri(target), ringing_timeout_s=dest.ringing_timeout_s)
+                    room_name=self.room_name,
+                    participant_identity=self.caller_identity,
+                    to_uri=to_sip_uri(target),
+                    ringing_timeout_s=dest.ringing_timeout_s,
+                )
             return "completed", None
         except SipCallError as e:
-            logger.warning("transfer attempt failed", extra={"destination": dest.name,
-                                                             "status": e.status,
-                                                             "sip_code": e.sip_code})
+            logger.warning(
+                "transfer attempt failed",
+                extra={"destination": dest.name, "status": e.status, "sip_code": e.sip_code},
+            )
             return e.status, e.message
         except Exception as e:  # warm transfer raises ToolError on decline/voicemail
             text = str(e).lower()
-            status = ("no_answer" if "voicemail" in text or "answer" in text else
-                      "rejected" if "declin" in text else "failed")
-            logger.warning("transfer attempt failed", extra={"destination": dest.name,
-                                                             "error": str(e)[:200]})
+            status = (
+                "no_answer"
+                if "voicemail" in text or "answer" in text
+                else "rejected"
+                if "declin" in text
+                else "failed"
+            )
+            logger.warning(
+                "transfer attempt failed", extra={"destination": dest.name, "error": str(e)[:200]}
+            )
             return status, str(e)[:300]
 
     async def _emit(self, event: dict[str, Any]) -> None:

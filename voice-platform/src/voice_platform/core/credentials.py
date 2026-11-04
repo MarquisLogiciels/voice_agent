@@ -48,7 +48,7 @@ class SalesforceCredential(_Strict):
 class GoogleServiceAccount(_Strict):
     client_email: str
     private_key: str
-    token_uri: str = "https://oauth2.googleapis.com/token"
+    token_uri: str = "https://oauth2.googleapis.com/token"  # noqa: S105 - endpoint URL
     delegated_user: str | None = None  # domain-wide delegation subject
 
 
@@ -120,7 +120,9 @@ class CredentialVault:
     ) -> Credential:
         clean = validate_credential_payload(kind, payload)
         exists = await session.scalar(
-            sa.select(Credential.id).where(Credential.tenant_id == tenant_id, Credential.name == name)
+            sa.select(Credential.id).where(
+                Credential.tenant_id == tenant_id, Credential.name == name
+            )
         )
         if exists:
             raise ConflictError(f"credential '{name}' already exists")
@@ -138,7 +140,11 @@ class CredentialVault:
         return cred
 
     async def update(
-        self, session: AsyncSession, *, tenant_id: uuid.UUID, credential_id: uuid.UUID,
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: uuid.UUID,
+        credential_id: uuid.UUID,
         payload: dict[str, Any],
     ) -> Credential:
         cred = await self._get(session, tenant_id, credential_id)

@@ -32,7 +32,9 @@ class ProviderRegistry:
     def register(self, descriptor: ProviderDescriptor, *, replace: bool = False) -> None:
         key = (descriptor.kind, descriptor.name)
         if key in self._providers and not replace:
-            raise ProviderError(f"provider {descriptor.kind.value}/{descriptor.name} already registered")
+            raise ProviderError(
+                f"provider {descriptor.kind.value}/{descriptor.name} already registered"
+            )
         self._providers[key] = descriptor
 
     def get(self, kind: ProviderKind, name: str) -> ProviderDescriptor:
@@ -47,15 +49,20 @@ class ProviderRegistry:
     def has(self, kind: ProviderKind, name: str) -> bool:
         return (kind, name) in self._providers
 
-    def list(self, kind: ProviderKind | None = None) -> list[ProviderDescriptor]:
+    def descriptors(self, kind: ProviderKind | None = None) -> list[ProviderDescriptor]:
         return sorted(
             (d for (k, _), d in self._providers.items() if kind is None or k is kind),
             key=lambda d: (d.kind.value, d.name),
         )
 
     def validate_ref(
-        self, kind: ProviderKind, ref: ProviderRef, path: str, ctx: BuildContext | None = None,
-        *, check_secrets: bool = True,
+        self,
+        kind: ProviderKind,
+        ref: ProviderRef,
+        path: str,
+        ctx: BuildContext | None = None,
+        *,
+        check_secrets: bool = True,
     ) -> list[Problem]:
         problems: list[Problem] = []
         if not self.has(kind, ref.provider):
@@ -77,29 +84,41 @@ class ProviderRegistry:
             problems.append(Problem(f"{path}.voice", f"{desc.name} requires a voice"))
         if desc.known_models and ref.model and ref.model not in desc.known_models:
             problems.append(
-                Problem(f"{path}.model", f"model '{ref.model}' is not in the known list for "
-                        f"{desc.name}; it will be passed through unchanged", "warning")
+                Problem(
+                    f"{path}.model",
+                    f"model '{ref.model}' is not in the known list for "
+                    f"{desc.name}; it will be passed through unchanged",
+                    "warning",
+                )
             )
         langs = desc.capabilities.languages
         if langs and ref.language and ref.language.split("-")[0] not in langs:
             problems.append(
-                Problem(f"{path}.language", f"{desc.name} does not list language "
-                        f"'{ref.language}'", "warning")
+                Problem(
+                    f"{path}.language",
+                    f"{desc.name} does not list language '{ref.language}'",
+                    "warning",
+                )
             )
         if check_secrets and desc.secret_env and ctx is not None:
             try:
                 if ctx.secret(ref, desc.secret_env) is None:
-                    problems.append(Problem(
-                        f"{path}", f"no API key: set one of {', '.join(desc.secret_env)} or "
-                        "reference a tenant credential"))
+                    problems.append(
+                        Problem(
+                            f"{path}",
+                            f"no API key: set one of {', '.join(desc.secret_env)} or "
+                            "reference a tenant credential",
+                        )
+                    )
             except MissingSecretError as e:
                 problems.append(Problem(f"{path}.credential", str(e)))
         return problems
 
     def create(self, kind: ProviderKind, ref: ProviderRef, ctx: BuildContext) -> Any:
         desc = self.get(kind, ref.provider)
-        problems = [p for p in self.validate_ref(kind, ref, kind.value, ctx) if
-                    p.severity == "error"]
+        problems = [
+            p for p in self.validate_ref(kind, ref, kind.value, ctx) if p.severity == "error"
+        ]
         if problems:
             raise ProviderError("; ".join(f"{p.path}: {p.message}" for p in problems))
         try:

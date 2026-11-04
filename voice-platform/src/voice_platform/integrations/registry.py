@@ -42,24 +42,58 @@ def _sandbox(ctx: IntegrationContext) -> SandboxSuite:
 
 
 KINDS: dict[str, IntegrationKind] = {
-    k.name: k for k in [
-        IntegrationKind("hubspot", frozenset({"crm"}), HubSpotConfig, frozenset({"hubspot"}),
-                        HubSpotCRM, "HubSpot CRM (contacts, deals/leads, notes)"),
-        IntegrationKind("salesforce", frozenset({"crm"}), SalesforceConfig,
-                        frozenset({"salesforce"}), SalesforceCRM,
-                        "Salesforce (contacts, leads, call tasks)"),
-        IntegrationKind("google_calendar", frozenset({"calendar"}), GoogleCalendarConfig,
-                        frozenset({"google_service_account", "google_oauth"}), GoogleCalendar,
-                        "Google Calendar availability and booking"),
-        IntegrationKind("custom_rest", frozenset({"custom"}), CustomRestConfig,
-                        frozenset({"bearer", "basic", "api_key_header"}),
-                        lambda ctx: CustomRestIntegration(
-                            ctx, allow_insecure=bool(ctx.extra.get("allow_insecure"))),
-                        "Declarative REST actions with SSRF protection"),
-        IntegrationKind("twilio", frozenset({"messaging"}), TwilioConfig, frozenset({"twilio"}),
-                        TwilioMessaging, "Twilio SMS"),
-        IntegrationKind("sandbox", frozenset({"crm", "calendar", "messaging"}), SandboxState,
-                        frozenset(), _sandbox, "In-memory sandbox for testing (no real systems)"),
+    k.name: k
+    for k in [
+        IntegrationKind(
+            "hubspot",
+            frozenset({"crm"}),
+            HubSpotConfig,
+            frozenset({"hubspot"}),
+            HubSpotCRM,
+            "HubSpot CRM (contacts, deals/leads, notes)",
+        ),
+        IntegrationKind(
+            "salesforce",
+            frozenset({"crm"}),
+            SalesforceConfig,
+            frozenset({"salesforce"}),
+            SalesforceCRM,
+            "Salesforce (contacts, leads, call tasks)",
+        ),
+        IntegrationKind(
+            "google_calendar",
+            frozenset({"calendar"}),
+            GoogleCalendarConfig,
+            frozenset({"google_service_account", "google_oauth"}),
+            GoogleCalendar,
+            "Google Calendar availability and booking",
+        ),
+        IntegrationKind(
+            "custom_rest",
+            frozenset({"custom"}),
+            CustomRestConfig,
+            frozenset({"bearer", "basic", "api_key_header"}),
+            lambda ctx: CustomRestIntegration(
+                ctx, allow_insecure=bool(ctx.extra.get("allow_insecure"))
+            ),
+            "Declarative REST actions with SSRF protection",
+        ),
+        IntegrationKind(
+            "twilio",
+            frozenset({"messaging"}),
+            TwilioConfig,
+            frozenset({"twilio"}),
+            TwilioMessaging,
+            "Twilio SMS",
+        ),
+        IntegrationKind(
+            "sandbox",
+            frozenset({"crm", "calendar", "messaging"}),
+            SandboxState,
+            frozenset(),
+            _sandbox,
+            "In-memory sandbox for testing (no real systems)",
+        ),
     ]
 }
 
@@ -67,13 +101,18 @@ KINDS: dict[str, IntegrationKind] = {
 def validate_integration_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:
     spec = KINDS.get(kind)
     if spec is None:
-        raise ValidationFailedError(f"unknown integration kind '{kind}'",
-                                    details={"kinds": sorted(KINDS)})
+        raise ValidationFailedError(
+            f"unknown integration kind '{kind}'", details={"kinds": sorted(KINDS)}
+        )
     try:
         return spec.config_model.model_validate(config).model_dump(mode="json", exclude_none=True)
     except ValidationError as e:
-        raise ValidationFailedError("invalid integration config", details={"errors": [
-            {"loc": list(err["loc"]), "msg": err["msg"]} for err in e.errors()]}) from e
+        raise ValidationFailedError(
+            "invalid integration config",
+            details={
+                "errors": [{"loc": list(err["loc"]), "msg": err["msg"]} for err in e.errors()]
+            },
+        ) from e
 
 
 @dataclass
@@ -97,34 +136,56 @@ class IntegrationSet:
 
 
 class IntegrationResolver:
-    def __init__(self, vault: CredentialVault, *, timeout_s: float = 8.0,
-                 allow_insecure: bool = False) -> None:
+    def __init__(
+        self, vault: CredentialVault, *, timeout_s: float = 8.0, allow_insecure: bool = False
+    ) -> None:
         self._vault = vault
         self._timeout = timeout_s
         self._allow_insecure = allow_insecure
 
-    async def build(self, session: AsyncSession, tenant_id: uuid.UUID, name: str,
-                    extra: dict[str, Any] | None = None) -> Any:
-        row = await session.scalar(sa.select(Integration).where(
-            Integration.tenant_id == tenant_id, Integration.name == name))
+    async def build(
+        self,
+        session: AsyncSession,
+        tenant_id: uuid.UUID,
+        name: str,
+        extra: dict[str, Any] | None = None,
+    ) -> Any:
+        row = await session.scalar(
+            sa.select(Integration).where(
+                Integration.tenant_id == tenant_id, Integration.name == name
+            )
+        )
         if row is None or not row.enabled:
-            raise IntegrationError(ErrorKind.CONFIGURATION,
-                                   f"integration '{name}' is missing or disabled")
+            raise IntegrationError(
+                ErrorKind.CONFIGURATION, f"integration '{name}' is missing or disabled"
+            )
         spec = KINDS[row.kind]
         creds = None
         if row.credential_id is not None:
-            creds = await self._vault.resolve(session, tenant_id=tenant_id,
-                                              credential_id=row.credential_id)
+            creds = await self._vault.resolve(
+                session, tenant_id=tenant_id, credential_id=row.credential_id
+            )
         ctx = IntegrationContext(
-            tenant_id=tenant_id, name=row.name, kind=row.kind, config=row.config,
-            credentials=creds, egress=EgressPolicy(), timeout_s=self._timeout,
+            tenant_id=tenant_id,
+            name=row.name,
+            kind=row.kind,
+            config=row.config,
+            credentials=creds,
+            egress=EgressPolicy(),
+            timeout_s=self._timeout,
             extra={"allow_insecure": self._allow_insecure, **(extra or {})},
         )
         return spec.factory(ctx)
 
     async def resolve_set(
-        self, session: AsyncSession, tenant_id: uuid.UUID, *, crm: str | None,
-        calendar: str | None, messaging: str | None, custom: list[str],
+        self,
+        session: AsyncSession,
+        tenant_id: uuid.UUID,
+        *,
+        crm: str | None,
+        calendar: str | None,
+        messaging: str | None,
+        custom: list[str],
         timezone: str = "UTC",
     ) -> IntegrationSet:
         out = IntegrationSet()
@@ -146,8 +207,10 @@ class IntegrationResolver:
             for name in custom:
                 adapter = await get(name)
                 if not isinstance(adapter, CustomRestIntegration):
-                    raise IntegrationError(ErrorKind.CONFIGURATION,
-                                           f"integration '{name}' is not a custom_rest integration")
+                    raise IntegrationError(
+                        ErrorKind.CONFIGURATION,
+                        f"integration '{name}' is not a custom_rest integration",
+                    )
                 out.custom[name] = adapter
         except Exception:
             await out.aclose()

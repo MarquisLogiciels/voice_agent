@@ -16,10 +16,12 @@ import sys
 import threading
 import time
 from collections.abc import Iterator, Mapping
+from types import MappingProxyType
 from typing import Any
 
+_EMPTY: Mapping[str, Any] = MappingProxyType({})
 _log_context: contextvars.ContextVar[Mapping[str, Any]] = contextvars.ContextVar(
-    "vp_log_context", default={}
+    "vp_log_context", default=_EMPTY
 )
 
 REDACTED = "[REDACTED]"
@@ -28,8 +30,10 @@ REDACTED = "[REDACTED]"
 _SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?i)(authorization\s*[:=]\s*)(bearer|basic|token)?\s*[^\s,;\"']+"),
     re.compile(r"(?i)(bearer\s+)[a-z0-9\-._~+/]+=*"),
-    re.compile(r"(?i)((?:api[_-]?key|apikey|secret|password|passwd|token|auth_token)"
-               r"[\"']?\s*[:=]\s*[\"']?)[^\s,;\"'&}]+"),
+    re.compile(
+        r"(?i)((?:api[_-]?key|apikey|secret|password|passwd|token|auth_token)"
+        r"[\"']?\s*[:=]\s*[\"']?)[^\s,;\"'&}]+"
+    ),
     re.compile(r"\b(sk|pk|rk)-[A-Za-z0-9_\-]{16,}\b"),
     re.compile(r"\bvpk_[A-Za-z0-9_\-]{10,}\b"),
     re.compile(r"\bAC[0-9a-f]{32}\b"),  # Twilio account SID-like identifiers
@@ -37,9 +41,21 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 _SENSITIVE_KEYS = {
-    "authorization", "password", "passwd", "secret", "token", "access_token",
-    "refresh_token", "api_key", "apikey", "client_secret", "private_key", "auth_token",
-    "x-api-key", "cookie", "set-cookie",
+    "authorization",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "client_secret",
+    "private_key",
+    "auth_token",
+    "x-api-key",
+    "cookie",
+    "set-cookie",
 }
 
 

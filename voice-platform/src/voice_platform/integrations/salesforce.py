@@ -31,10 +31,15 @@ from .base import (
 )
 from .http import IntegrationHttpClient
 
-SALESFORCE_EGRESS = EgressPolicy(allowed_hosts=(
-    "login.salesforce.com", "test.salesforce.com", "*.my.salesforce.com",
-    "*.salesforce.com", "*.force.com",
-))
+SALESFORCE_EGRESS = EgressPolicy(
+    allowed_hosts=(
+        "login.salesforce.com",
+        "test.salesforce.com",
+        "*.my.salesforce.com",
+        "*.salesforce.com",
+        "*.force.com",
+    )
+)
 _SF_ID = re.compile(r"^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$")
 _SOSL_RESERVED = re.compile(r'([?&|!{}\[\]()^~*:\\"\'+\-])')
 
@@ -74,21 +79,32 @@ class _TokenManager:
                 return self.access_token, self.instance_url
             login = str(self._creds.get("login_url") or "https://login.salesforce.com").rstrip("/")
             SALESFORCE_EGRESS.check_url(login)
-            form = {"client_id": self._creds["client_id"],
-                    "client_secret": self._creds["client_secret"]}
+            form = {
+                "client_id": self._creds["client_id"],
+                "client_secret": self._creds["client_secret"],
+            }
             if self._creds.get("refresh_token"):
-                form |= {"grant_type": "refresh_token",
-                         "refresh_token": self._creds["refresh_token"]}
+                form |= {
+                    "grant_type": "refresh_token",
+                    "refresh_token": self._creds["refresh_token"],
+                }
             else:
                 form |= {"grant_type": "client_credentials"}
             try:
                 resp = await self._http.post(f"{login}/services/oauth2/token", data=form)
             except httpx.HTTPError as e:
-                raise IntegrationError(ErrorKind.UNAVAILABLE, "Salesforce token request failed",
-                                       integration="salesforce") from e
+                raise IntegrationError(
+                    ErrorKind.UNAVAILABLE,
+                    "Salesforce token request failed",
+                    integration="salesforce",
+                ) from e
             if resp.status_code != 200:
-                raise IntegrationError(ErrorKind.AUTH, "Salesforce rejected the credentials",
-                                       status=resp.status_code, integration="salesforce")
+                raise IntegrationError(
+                    ErrorKind.AUTH,
+                    "Salesforce rejected the credentials",
+                    status=resp.status_code,
+                    integration="salesforce",
+                )
             data = resp.json()
             self.access_token = data["access_token"]
             self.instance_url = data["instance_url"].rstrip("/")
@@ -99,19 +115,24 @@ class _TokenManager:
 
 
 class SalesforceCRM:
-    def __init__(self, ctx: IntegrationContext, *, transport: httpx.AsyncBaseTransport | None = None
-                 ) -> None:
+    def __init__(
+        self, ctx: IntegrationContext, *, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
         from ..shared.http import _GuardedTransport
 
         self.name = ctx.name
         self.cfg = SalesforceConfig.model_validate(ctx.config)
         creds = ctx.credentials or {}
         if not creds.get("client_id") or not creds.get("client_secret"):
-            raise IntegrationError(ErrorKind.CONFIGURATION, "Salesforce credential missing",
-                                   integration=ctx.name)
+            raise IntegrationError(
+                ErrorKind.CONFIGURATION, "Salesforce credential missing", integration=ctx.name
+            )
         self._token_http = httpx.AsyncClient(
-            timeout=ctx.timeout_s, transport=transport or _GuardedTransport(SALESFORCE_EGRESS),
-            follow_redirects=False, trust_env=False)
+            timeout=ctx.timeout_s,
+            transport=transport or _GuardedTransport(SALESFORCE_EGRESS),
+            follow_redirects=False,
+            trust_env=False,
+        )
         self.tokens = _TokenManager(creds, self._token_http)
         self._timeout = ctx.timeout_s
         self._transport = transport
@@ -131,9 +152,13 @@ class SalesforceCRM:
                 req.headers["Authorization"] = f"Bearer {token}"
 
             self._http = IntegrationHttpClient(
-                integration=f"salesforce:{self.name}", base_url=instance,
-                egress=SALESFORCE_EGRESS, auth=auth, timeout_s=self._timeout,
-                transport=self._transport)
+                integration=f"salesforce:{self.name}",
+                base_url=instance,
+                egress=SALESFORCE_EGRESS,
+                auth=auth,
+                timeout_s=self._timeout,
+                transport=self._transport,
+            )
         return self._http
 
     async def _call(self, method: str, path: str, **kw: Any) -> Any:
@@ -149,16 +174,23 @@ class SalesforceCRM:
 
     def _contact(self, r: dict[str, Any]) -> Contact:
         account = r.get("Account") or {}
-        return Contact(id=r["Id"], first_name=r.get("FirstName"), last_name=r.get("LastName"),
-                       email=r.get("Email"), phone=r.get("Phone") or r.get("MobilePhone"),
-                       company=account.get("Name") if isinstance(account, dict) else None,
-                       source="salesforce",
-                       url=f"{self.tokens.instance_url}/lightning/r/Contact/{r['Id']}/view")
+        return Contact(
+            id=r["Id"],
+            first_name=r.get("FirstName"),
+            last_name=r.get("LastName"),
+            email=r.get("Email"),
+            phone=r.get("Phone") or r.get("MobilePhone"),
+            company=account.get("Name") if isinstance(account, dict) else None,
+            source="salesforce",
+            url=f"{self.tokens.instance_url}/lightning/r/Contact/{r['Id']}/view",
+        )
 
     async def _sosl(self, term: str, scope: str, limit: int) -> list[Contact]:
-        q = (f"FIND {{{sosl_escape(term)}}} IN {scope} FIELDS RETURNING "
-             f"Contact(Id, FirstName, LastName, Email, Phone, MobilePhone, Account.Name "
-             f"LIMIT {max(1, min(limit, 20))})")
+        q = (
+            f"FIND {{{sosl_escape(term)}}} IN {scope} FIELDS RETURNING "
+            f"Contact(Id, FirstName, LastName, Email, Phone, MobilePhone, Account.Name "
+            f"LIMIT {max(1, min(limit, 20))})"
+        )
         data = await self._call("GET", "/search/", params={"q": q}, operation="contacts.search")
         return [self._contact(r) for r in (data or {}).get("searchRecords", [])]
 
@@ -170,9 +202,12 @@ class SalesforceCRM:
 
     async def get_contact(self, contact_id: str) -> Contact | None:
         try:
-            r = await self._call("GET", f"/sobjects/Contact/{_check_id(contact_id)}",
-                                 params={"fields": "Id,FirstName,LastName,Email,Phone,MobilePhone"},
-                                 operation="contacts.get")
+            r = await self._call(
+                "GET",
+                f"/sobjects/Contact/{_check_id(contact_id)}",
+                params={"fields": "Id,FirstName,LastName,Email,Phone,MobilePhone"},
+                operation="contacts.get",
+            )
         except IntegrationError as e:
             if e.kind is ErrorKind.NOT_FOUND:
                 return None
@@ -181,8 +216,7 @@ class SalesforceCRM:
 
     @staticmethod
     def _fields(data: ContactInput | ContactUpdate) -> dict[str, Any]:
-        m = {"first_name": "FirstName", "last_name": "LastName", "email": "Email",
-             "phone": "Phone"}
+        m = {"first_name": "FirstName", "last_name": "LastName", "email": "Email", "phone": "Phone"}
         return {m[k]: str(v) for k, v in data.model_dump(exclude_none=True).items() if k in m}
 
     async def create_contact(self, data: ContactInput, *, idempotency_key: str) -> Contact:
@@ -194,8 +228,9 @@ class SalesforceCRM:
         fields.setdefault("LastName", data.last_name or "Unknown")
         if data.notes:
             fields["Description"] = data.notes
-        created = await self._call("POST", "/sobjects/Contact/", json_body=fields,
-                                   operation="contacts.create")
+        created = await self._call(
+            "POST", "/sobjects/Contact/", json_body=fields, operation="contacts.create"
+        )
         contact = await self.get_contact(created["id"])
         if contact is None:
             raise IntegrationError(ErrorKind.UNKNOWN, "contact created but not readable")
@@ -205,8 +240,13 @@ class SalesforceCRM:
         fields = self._fields(data)
         if not fields:
             raise IntegrationError(ErrorKind.VALIDATION, "no fields to update")
-        await self._call("PATCH", f"/sobjects/Contact/{_check_id(contact_id)}", json_body=fields,
-                         retry_unsafe=True, operation="contacts.update")
+        await self._call(
+            "PATCH",
+            f"/sobjects/Contact/{_check_id(contact_id)}",
+            json_body=fields,
+            retry_unsafe=True,
+            operation="contacts.update",
+        )
         contact = await self.get_contact(contact_id)
         if contact is None:
             raise IntegrationError(ErrorKind.NOT_FOUND, "contact not found after update")
@@ -214,10 +254,13 @@ class SalesforceCRM:
 
     async def create_lead(self, data: LeadInput, *, idempotency_key: str) -> Lead:
         fields: dict[str, Any] = {
-            "FirstName": data.first_name, "LastName": data.last_name or "Unknown",
-            "Company": data.company or self.cfg.default_company, "Phone": data.phone,
+            "FirstName": data.first_name,
+            "LastName": data.last_name or "Unknown",
+            "Company": data.company or self.cfg.default_company,
+            "Phone": data.phone,
             "Email": str(data.email) if data.email else None,
-            "Title": data.title[:128], "Description": data.description,
+            "Title": data.title[:128],
+            "Description": data.description,
             "LeadSource": self.cfg.lead_source,
         }
         if self.cfg.lead_status:
@@ -226,39 +269,71 @@ class SalesforceCRM:
         if self.cfg.external_id_field:
             key = re.sub(r"[^A-Za-z0-9_\-]", "", idempotency_key)[:80]
             result = await self._call(
-                "PATCH", f"/sobjects/Lead/{self.cfg.external_id_field}/{key}", json_body=fields,
-                retry_unsafe=True, operation="leads.upsert")
+                "PATCH",
+                f"/sobjects/Lead/{self.cfg.external_id_field}/{key}",
+                json_body=fields,
+                retry_unsafe=True,
+                operation="leads.upsert",
+            )
             lead_id = (result or {}).get("id")
             if not lead_id:  # 204 on update of an existing record
                 existing = await self._call(
-                    "GET", f"/sobjects/Lead/{self.cfg.external_id_field}/{key}",
-                    params={"fields": "Id"}, operation="leads.get")
+                    "GET",
+                    f"/sobjects/Lead/{self.cfg.external_id_field}/{key}",
+                    params={"fields": "Id"},
+                    operation="leads.get",
+                )
                 lead_id = existing["Id"]
         else:
-            result = await self._call("POST", "/sobjects/Lead/", json_body=fields,
-                                      operation="leads.create")
+            result = await self._call(
+                "POST", "/sobjects/Lead/", json_body=fields, operation="leads.create"
+            )
             lead_id = result["id"]
-        return Lead(id=lead_id, contact_id=data.contact_id, title=data.title,
-                    status=self.cfg.lead_status, description=data.description,
-                    source="salesforce",
-                    url=f"{self.tokens.instance_url}/lightning/r/Lead/{lead_id}/view")
+        return Lead(
+            id=lead_id,
+            contact_id=data.contact_id,
+            title=data.title,
+            status=self.cfg.lead_status,
+            description=data.description,
+            source="salesforce",
+            url=f"{self.tokens.instance_url}/lightning/r/Lead/{lead_id}/view",
+        )
 
     async def update_lead(self, lead_id: str, data: LeadUpdate) -> Lead:
         m = {"status": "Status", "description": "Description", "title": "Title"}
         fields = {m[k]: v for k, v in data.changes().items() if k in m}
         if not fields:
             raise IntegrationError(ErrorKind.VALIDATION, "no fields to update")
-        await self._call("PATCH", f"/sobjects/Lead/{_check_id(lead_id)}", json_body=fields,
-                         retry_unsafe=True, operation="leads.update")
-        r = await self._call("GET", f"/sobjects/Lead/{lead_id}",
-                             params={"fields": "Id,Title,Status,Description"},
-                             operation="leads.get")
-        return Lead(id=r["Id"], title=r.get("Title") or "", status=r.get("Status"),
-                    description=r.get("Description"), source="salesforce")
+        await self._call(
+            "PATCH",
+            f"/sobjects/Lead/{_check_id(lead_id)}",
+            json_body=fields,
+            retry_unsafe=True,
+            operation="leads.update",
+        )
+        r = await self._call(
+            "GET",
+            f"/sobjects/Lead/{lead_id}",
+            params={"fields": "Id,Title,Status,Description"},
+            operation="leads.get",
+        )
+        return Lead(
+            id=r["Id"],
+            title=r.get("Title") or "",
+            status=r.get("Status"),
+            description=r.get("Description"),
+            source="salesforce",
+        )
 
     async def add_note(self, contact_id: str, text: str, *, idempotency_key: str) -> str:
-        task = {"WhoId": _check_id(contact_id), "Subject": "Phone call note (AI agent)",
-                "Description": text[:32_000], "Status": "Completed", "TaskSubtype": "Call"}
-        created = await self._call("POST", "/sobjects/Task/", json_body=task,
-                                   operation="notes.create")
+        task = {
+            "WhoId": _check_id(contact_id),
+            "Subject": "Phone call note (AI agent)",
+            "Description": text[:32_000],
+            "Status": "Completed",
+            "TaskSubtype": "Call",
+        }
+        created = await self._call(
+            "POST", "/sobjects/Task/", json_body=task, operation="notes.create"
+        )
         return str(created["id"])

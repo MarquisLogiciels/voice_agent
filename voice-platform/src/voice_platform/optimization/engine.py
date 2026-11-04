@@ -50,8 +50,9 @@ def gate(cmp: Comparison, t: GateThresholds) -> GateDecision:
     if c["pass_rate"] < t.min_pass_rate:
         reasons.append(f"pass rate {c['pass_rate']:.2f} below minimum {t.min_pass_rate:.2f}")
     if c["pass_rate"] - b["pass_rate"] <= t.min_improvement:
-        reasons.append(f"no improvement over baseline ({b['pass_rate']:.2f} → "
-                       f"{c['pass_rate']:.2f})")
+        reasons.append(
+            f"no improvement over baseline ({b['pass_rate']:.2f} → {c['pass_rate']:.2f})"
+        )
     if cmp.critical_regressions and not t.allow_critical_regressions:
         reasons.append(f"critical scenario regressions: {cmp.critical_regressions}")
     if len(cmp.regressions) > t.max_scenario_regressions:
@@ -76,12 +77,16 @@ class Iteration:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "index": self.index, "proposer": self.proposer,
+            "index": self.index,
+            "proposer": self.proposer,
             "patches_applied": [p.as_dict() for p in self.patches_applied],
-            "patches_rejected": [{"patch": p.as_dict(), "reason": r}
-                                 for p, r in self.patches_rejected],
-            "summary": self.summary, "comparison": self.comparison,
-            "decision": self.decision.as_dict() if self.decision else None, "kept": self.kept,
+            "patches_rejected": [
+                {"patch": p.as_dict(), "reason": r} for p, r in self.patches_rejected
+            ],
+            "summary": self.summary,
+            "comparison": self.comparison,
+            "decision": self.decision.as_dict() if self.decision else None,
+            "kept": self.kept,
         }
 
 
@@ -97,7 +102,8 @@ class OptimizationOutcome:
 
     def report(self) -> dict[str, Any]:
         return {
-            "started_at": self.started_at, "decision": self.decision,
+            "started_at": self.started_at,
+            "decision": self.decision,
             "baseline": self.baseline.summary(),
             "best": self.best_result.summary() if self.best_result else None,
             "final_gate": self.final_gate.as_dict() if self.final_gate else None,
@@ -106,15 +112,19 @@ class OptimizationOutcome:
 
     def markdown(self) -> str:
         b = self.baseline.summary()
-        lines = ["# Optimization report", "",
-                 f"- Decision: **{self.decision}** (production promotion still requires human "
-                 "approval)",
-                 f"- Baseline pass rate: {b['pass_rate']:.0%} (95% CI {b['pass_rate_ci95'][0]:.0%}"
-                 f"–{b['pass_rate_ci95'][1]:.0%}) over {b['runs']} runs"]
+        lines = [
+            "# Optimization report",
+            "",
+            f"- Decision: **{self.decision}** (production promotion still requires human approval)",
+            f"- Baseline pass rate: {b['pass_rate']:.0%} (95% CI {b['pass_rate_ci95'][0]:.0%}"
+            f"–{b['pass_rate_ci95'][1]:.0%}) over {b['runs']} runs",
+        ]
         if self.best_result is not None:
             c = self.best_result.summary()
-            lines.append(f"- Best candidate pass rate: {c['pass_rate']:.0%} (95% CI "
-                         f"{c['pass_rate_ci95'][0]:.0%}–{c['pass_rate_ci95'][1]:.0%})")
+            lines.append(
+                f"- Best candidate pass rate: {c['pass_rate']:.0%} (95% CI "
+                f"{c['pass_rate_ci95'][0]:.0%}–{c['pass_rate_ci95'][1]:.0%})"
+            )
         if self.final_gate is not None and self.final_gate.reasons:
             lines.append("- Gate: " + "; ".join(self.final_gate.reasons))
         lines += ["", "## Baseline failure categories", ""]
@@ -129,9 +139,11 @@ class OptimizationOutcome:
             for p, reason in it.patches_rejected:
                 lines.append(f"- rejected `{p.path}`: {reason}")
             if it.comparison:
-                lines.append(f"- pass rate Δ {it.comparison['delta_pass_rate']:+.2f}; "
-                             f"regressions: {it.comparison['regressions'] or 'none'}; "
-                             f"improvements: {it.comparison['improvements'] or 'none'}")
+                lines.append(
+                    f"- pass rate Δ {it.comparison['delta_pass_rate']:+.2f}; "
+                    f"regressions: {it.comparison['regressions'] or 'none'}; "
+                    f"improvements: {it.comparison['improvements'] or 'none'}"
+                )
             if it.decision and it.decision.reasons:
                 lines.append("- gate: " + "; ".join(it.decision.reasons))
             lines.append("")
@@ -139,9 +151,17 @@ class OptimizationOutcome:
 
 
 class Optimizer:
-    def __init__(self, runner: BenchmarkRunner, proposers: list[Proposer], *,
-                 policy: PatchPolicy | None = None, thresholds: GateThresholds | None = None,
-                 repetitions: int = 1, seed: int = 0, max_iterations: int = 4) -> None:
+    def __init__(
+        self,
+        runner: BenchmarkRunner,
+        proposers: list[Proposer],
+        *,
+        policy: PatchPolicy | None = None,
+        thresholds: GateThresholds | None = None,
+        repetitions: int = 1,
+        seed: int = 0,
+        max_iterations: int = 4,
+    ) -> None:
         self.runner = runner
         self.proposers = proposers
         self.policy = policy or PatchPolicy()
@@ -152,11 +172,16 @@ class Optimizer:
 
     def _interim_decision(self, cmp: Comparison) -> GateDecision:
         t = self.thresholds
-        strict = gate(cmp, GateThresholds(
-            min_pass_rate=0.0, min_improvement=t.min_improvement,
-            allow_critical_regressions=t.allow_critical_regressions,
-            max_scenario_regressions=t.max_scenario_regressions,
-            max_latency_regression_s=t.max_latency_regression_s))
+        strict = gate(
+            cmp,
+            GateThresholds(
+                min_pass_rate=0.0,
+                min_improvement=t.min_improvement,
+                allow_critical_regressions=t.allow_critical_regressions,
+                max_scenario_regressions=t.max_scenario_regressions,
+                max_latency_regression_s=t.max_latency_regression_s,
+            ),
+        )
         if strict.eligible:
             return strict
         # Only "no improvement in pass rate" may be waived, and only for a real score gain.
@@ -164,15 +189,25 @@ class Optimizer:
         d_pass = cmp.candidate["pass_rate"] - cmp.baseline["pass_rate"]
         d_score = cmp.candidate["mean_score"] - cmp.baseline["mean_score"]
         if not others and d_pass >= 0 and d_score >= t.min_interim_score_gain:
-            return GateDecision(True, [f"kept for partial improvement (mean score "
-                                       f"{cmp.baseline['mean_score']:.3f} → "
-                                       f"{cmp.candidate['mean_score']:.3f})"])
+            return GateDecision(
+                True,
+                [
+                    f"kept for partial improvement (mean score "
+                    f"{cmp.baseline['mean_score']:.3f} → "
+                    f"{cmp.candidate['mean_score']:.3f})"
+                ],
+            )
         return strict
 
-    async def run(self, baseline: AgentConfig, scenarios: list[Scenario],
-                  baseline_result: BenchmarkResult | None = None) -> OptimizationOutcome:
+    async def run(
+        self,
+        baseline: AgentConfig,
+        scenarios: list[Scenario],
+        baseline_result: BenchmarkResult | None = None,
+    ) -> OptimizationOutcome:
         base = baseline_result or await self.runner.run(
-            baseline, scenarios, repetitions=self.repetitions, seed=self.seed)
+            baseline, scenarios, repetitions=self.repetitions, seed=self.seed
+        )
         outcome = OptimizationOutcome(baseline=base, best_config=None, best_result=None)
         current_cfg, current_res = baseline, base
         for i in range(1, self.max_iterations + 1):
@@ -190,17 +225,29 @@ class Optimizer:
                 break
             candidate_cfg, applied, rejected = apply_patches(current_cfg, patches, self.policy)
             if not applied:
-                outcome.iterations.append(Iteration(i, proposer_name, [], rejected, None, None,
-                                                    None, False))
+                outcome.iterations.append(
+                    Iteration(i, proposer_name, [], rejected, None, None, None, False)
+                )
                 continue
-            cand = await self.runner.run(candidate_cfg, scenarios, repetitions=self.repetitions,
-                                         seed=self.seed)
+            cand = await self.runner.run(
+                candidate_cfg, scenarios, repetitions=self.repetitions, seed=self.seed
+            )
             # compare against the current best (incremental) — no regressions allowed
             cmp = compare(current_res, cand, scenarios)
             decision = self._interim_decision(cmp)
             kept = decision.eligible
-            outcome.iterations.append(Iteration(i, proposer_name, applied, rejected,
-                                                cand.summary(), cmp.as_dict(), decision, kept))
+            outcome.iterations.append(
+                Iteration(
+                    i,
+                    proposer_name,
+                    applied,
+                    rejected,
+                    cand.summary(),
+                    cmp.as_dict(),
+                    decision,
+                    kept,
+                )
+            )
             if kept:
                 current_cfg, current_res = candidate_cfg, cand
         if current_res is not base:

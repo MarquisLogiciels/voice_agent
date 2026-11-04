@@ -32,6 +32,20 @@ def _opts(model: type[_Opts], ref: ProviderRef) -> dict[str, Any]:
     return model.model_validate(ref.options).kwargs()
 
 
+def _key(ref: ProviderRef, ctx: BuildContext, *env: str) -> Any:
+    """API key for a plugin, or LiveKit's NOT_GIVEN so the plugin applies its own defaults."""
+    from livekit.agents import NOT_GIVEN
+
+    value = ctx.secret(ref, env)
+    return value if value else NOT_GIVEN
+
+
+def _voice(ref: ProviderRef) -> str:
+    if not ref.voice:
+        raise ValueError(f"{ref.provider} requires a voice")
+    return ref.voice
+
+
 def _lang(ref: ProviderRef, ctx: BuildContext) -> str:
     return ref.language or ctx.default_language
 
@@ -60,7 +74,7 @@ def _deepgram_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
     return deepgram.STT(
         model=ref.model or "nova-3",
         language=_lang(ref, ctx),
-        api_key=ctx.secret(ref, ("DEEPGRAM_API_KEY",)),
+        api_key=_key(ref, ctx, "DEEPGRAM_API_KEY"),
         **_opts(DeepgramSTTOptions, ref),
     )
 
@@ -80,13 +94,17 @@ def _assemblyai_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
     kwargs = _opts(AssemblyAISTTOptions, ref)
     lang = _lang(ref, ctx)
     model = ref.model or (
-        "universal-streaming-english" if lang.startswith("en") else
-        "universal-streaming-multilingual"
+        "universal-streaming-english"
+        if lang.startswith("en")
+        else "universal-streaming-multilingual"
     )
     if not lang.startswith("en") and "language_detection" not in kwargs:
         kwargs["language_detection"] = True
-    return assemblyai.STT(model=model, api_key=ctx.secret(ref, ("ASSEMBLYAI_API_KEY",)),
-                          **kwargs)
+    return assemblyai.STT(
+        model=model,  # type: ignore[arg-type]  # model ids are validated by AssemblyAI
+        api_key=_key(ref, ctx, "ASSEMBLYAI_API_KEY"),
+        **kwargs,
+    )
 
 
 class OpenAISTTOptions(_Opts):
@@ -102,8 +120,12 @@ def _openai_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
     base_url = ctx.base_url(ref)
     if base_url:
         kwargs["base_url"] = base_url
-    return openai.STT(model=ref.model or "gpt-4o-transcribe", language=_lang(ref, ctx),
-                      api_key=ctx.secret(ref, ("OPENAI_API_KEY",)), **kwargs)
+    return openai.STT(
+        model=ref.model or "gpt-4o-transcribe",
+        language=_lang(ref, ctx),
+        api_key=_key(ref, ctx, "OPENAI_API_KEY"),
+        **kwargs,
+    )
 
 
 class GoogleSTTOptions(_Opts):
@@ -132,7 +154,9 @@ def _google_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
 
     lang = _lang(ref, ctx)
     return google.STT(
-        languages=lang, model=ref.model or "chirp_2", **_google_credentials(ref, ctx),
+        languages=lang,
+        model=ref.model or "chirp_2",
+        **_google_credentials(ref, ctx),
         **_opts(GoogleSTTOptions, ref),
     )
 
@@ -140,8 +164,11 @@ def _google_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
 def _cartesia_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
     from livekit.plugins import cartesia
 
-    return cartesia.STT(model=ref.model or "ink-whisper", language=_lang(ref, ctx),
-                        api_key=ctx.secret(ref, ("CARTESIA_API_KEY",)))
+    return cartesia.STT(
+        model=ref.model or "ink-whisper",
+        language=_lang(ref, ctx),
+        api_key=_key(ref, ctx, "CARTESIA_API_KEY"),
+    )
 
 
 def _livekit_stt(ref: ProviderRef, ctx: BuildContext) -> Any:
@@ -172,8 +199,9 @@ def _openai_llm(ref: ProviderRef, ctx: BuildContext) -> Any:
     base_url = ctx.base_url(ref)
     if base_url:
         kwargs["base_url"] = base_url
-    return openai.LLM(model=ref.model or "gpt-4.1-mini",
-                      api_key=ctx.secret(ref, ("OPENAI_API_KEY",)), **kwargs)
+    return openai.LLM(
+        model=ref.model or "gpt-4.1-mini", api_key=_key(ref, ctx, "OPENAI_API_KEY"), **kwargs
+    )
 
 
 class OpenAICompatibleOptions(OpenAILLMOptions):
@@ -189,8 +217,12 @@ def _openai_compatible_llm(ref: ProviderRef, ctx: BuildContext) -> Any:
         opts["temperature"] = ref.temperature
     if not ref.model:
         raise ValueError("openai-compatible provider requires an explicit model")
-    return openai.LLM(model=ref.model, base_url=base_url,
-                      api_key=ctx.secret(ref, ("OPENAI_COMPATIBLE_API_KEY",)), **opts)
+    return openai.LLM(
+        model=ref.model,
+        base_url=base_url,
+        api_key=_key(ref, ctx, "OPENAI_COMPATIBLE_API_KEY"),
+        **opts,
+    )
 
 
 class AnthropicLLMOptions(_Opts):
@@ -206,8 +238,11 @@ def _anthropic_llm(ref: ProviderRef, ctx: BuildContext) -> Any:
     kwargs: dict[str, Any] = _opts(AnthropicLLMOptions, ref)
     if ref.temperature is not None:
         kwargs["temperature"] = ref.temperature
-    return anthropic.LLM(model=ref.model or "claude-haiku-4-5",
-                         api_key=ctx.secret(ref, ("ANTHROPIC_API_KEY",)), **kwargs)
+    return anthropic.LLM(
+        model=ref.model or "claude-haiku-4-5",
+        api_key=_key(ref, ctx, "ANTHROPIC_API_KEY"),
+        **kwargs,
+    )
 
 
 class GoogleLLMOptions(_Opts):
@@ -225,7 +260,7 @@ def _google_llm(ref: ProviderRef, ctx: BuildContext) -> Any:
     if ref.temperature is not None:
         kwargs["temperature"] = ref.temperature
     if not kwargs.get("vertexai"):
-        kwargs["api_key"] = ctx.secret(ref, ("GOOGLE_API_KEY", "GEMINI_API_KEY"))
+        kwargs["api_key"] = _key(ref, ctx, "GOOGLE_API_KEY", "GEMINI_API_KEY")
     return google.LLM(model=ref.model or "gemini-2.5-flash", **kwargs)
 
 
@@ -263,9 +298,12 @@ def _elevenlabs_tts(ref: ProviderRef, ctx: BuildContext) -> Any:
         )
     if ref.language:
         kwargs["language"] = ref.language.split("-")[0]
-    return elevenlabs.TTS(voice_id=ref.voice, model=ref.model or "eleven_flash_v2_5",
-                          api_key=ctx.secret(ref, ("ELEVEN_API_KEY", "ELEVENLABS_API_KEY")),
-                          **kwargs)
+    return elevenlabs.TTS(
+        voice_id=_voice(ref),
+        model=ref.model or "eleven_flash_v2_5",
+        api_key=_key(ref, ctx, "ELEVEN_API_KEY", "ELEVENLABS_API_KEY"),
+        **kwargs,
+    )
 
 
 class CartesiaTTSOptions(_Opts):
@@ -277,10 +315,13 @@ class CartesiaTTSOptions(_Opts):
 def _cartesia_tts(ref: ProviderRef, ctx: BuildContext) -> Any:
     from livekit.plugins import cartesia
 
-    return cartesia.TTS(model=ref.model or "sonic-2", voice=ref.voice,
-                        language=(ref.language or ctx.default_language).split("-")[0],
-                        api_key=ctx.secret(ref, ("CARTESIA_API_KEY",)),
-                        **_opts(CartesiaTTSOptions, ref))
+    return cartesia.TTS(
+        model=ref.model or "sonic-2",
+        voice=_voice(ref),
+        language=(ref.language or ctx.default_language).split("-")[0],
+        api_key=_key(ref, ctx, "CARTESIA_API_KEY"),
+        **_opts(CartesiaTTSOptions, ref),
+    )
 
 
 class DeepgramTTSOptions(_Opts):
@@ -291,9 +332,11 @@ def _deepgram_tts(ref: ProviderRef, ctx: BuildContext) -> Any:
     from livekit.plugins import deepgram
 
     # Deepgram Aura encodes the voice in the model id (e.g. aura-2-thalia-en).
-    return deepgram.TTS(model=ref.voice or ref.model or "aura-2-thalia-en",
-                        api_key=ctx.secret(ref, ("DEEPGRAM_API_KEY",)),
-                        **_opts(DeepgramTTSOptions, ref))
+    return deepgram.TTS(
+        model=ref.voice or ref.model or "aura-2-thalia-en",
+        api_key=_key(ref, ctx, "DEEPGRAM_API_KEY"),
+        **_opts(DeepgramTTSOptions, ref),
+    )
 
 
 class OpenAITTSOptions(_Opts):
@@ -304,8 +347,12 @@ class OpenAITTSOptions(_Opts):
 def _openai_tts(ref: ProviderRef, ctx: BuildContext) -> Any:
     from livekit.plugins import openai
 
-    return openai.TTS(model=ref.model or "gpt-4o-mini-tts", voice=ref.voice or "ash",
-                      api_key=ctx.secret(ref, ("OPENAI_API_KEY",)), **_opts(OpenAITTSOptions, ref))
+    return openai.TTS(
+        model=ref.model or "gpt-4o-mini-tts",
+        voice=ref.voice or "ash",
+        api_key=_key(ref, ctx, "OPENAI_API_KEY"),
+        **_opts(OpenAITTSOptions, ref),
+    )
 
 
 class GoogleTTSOptions(_Opts):
@@ -317,8 +364,12 @@ class GoogleTTSOptions(_Opts):
 def _google_tts(ref: ProviderRef, ctx: BuildContext) -> Any:
     from livekit.plugins import google
 
-    return google.TTS(language=_lang(ref, ctx), voice_name=ref.voice or "",
-                      **_google_credentials(ref, ctx), **_opts(GoogleTTSOptions, ref))
+    return google.TTS(
+        language=_lang(ref, ctx),
+        voice_name=ref.voice or "",
+        **_google_credentials(ref, ctx),
+        **_opts(GoogleTTSOptions, ref),
+    )
 
 
 def _livekit_tts(ref: ProviderRef, ctx: BuildContext) -> Any:
@@ -403,8 +454,10 @@ def _openai_realtime(ref: ProviderRef, ctx: BuildContext) -> Any:
     if ref.temperature is not None:
         kwargs["temperature"] = ref.temperature
     return openai.realtime.RealtimeModel(
-        model=ref.model or "gpt-realtime", voice=ref.voice or "marin",
-        api_key=ctx.secret(ref, ("OPENAI_API_KEY",)), **kwargs,
+        model=ref.model or "gpt-realtime",
+        voice=ref.voice or "marin",
+        api_key=_key(ref, ctx, "OPENAI_API_KEY"),
+        **kwargs,
     )
 
 
@@ -420,105 +473,284 @@ def _google_realtime(ref: ProviderRef, ctx: BuildContext) -> Any:
         kwargs["language"] = ref.language
     return realtime.RealtimeModel(
         model=ref.model or "gemini-2.5-flash-native-audio-preview-09-2025",
-        api_key=ctx.secret(ref, ("GOOGLE_API_KEY", "GEMINI_API_KEY")), **kwargs,
+        api_key=_key(ref, ctx, "GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        **kwargs,
     )
 
 
 # ============================================================================================
 
+
 def register_builtin_providers(reg: ProviderRegistry) -> None:
     pricing = load_pricing()
     P = ProviderKind
 
-    def add(kind: ProviderKind, name: str, display: str, factory: Any, package: str, **kw: Any
-            ) -> None:
-        reg.register(ProviderDescriptor(
-            kind=kind, name=name, display_name=display, factory=factory, package=package,
-            pricing=pricing.get(f"{kind.value}/{name}", {}), **kw,
-        ))
+    def add(
+        kind: ProviderKind, name: str, display: str, factory: Any, package: str, **kw: Any
+    ) -> None:
+        reg.register(
+            ProviderDescriptor(
+                kind=kind,
+                name=name,
+                display_name=display,
+                factory=factory,
+                package=package,
+                pricing=pricing.get(f"{kind.value}/{name}", {}),
+                **kw,
+            )
+        )
 
     stream_stt = Capabilities(streaming=True, interim_results=True, emits_end_of_speech=True)
-    add(P.STT, "deepgram", "Deepgram", _deepgram_stt, "livekit-plugins-deepgram",
-        capabilities=stream_stt, secret_env=("DEEPGRAM_API_KEY",),
-        options_model=DeepgramSTTOptions, default_model="nova-3",
+    add(
+        P.STT,
+        "deepgram",
+        "Deepgram",
+        _deepgram_stt,
+        "livekit-plugins-deepgram",
+        capabilities=stream_stt,
+        secret_env=("DEEPGRAM_API_KEY",),
+        options_model=DeepgramSTTOptions,
+        default_model="nova-3",
         known_models=("nova-3", "nova-2", "nova-2-phonecall", "flux-general-en"),
-        health_check=health.deepgram)
-    add(P.STT, "assemblyai", "AssemblyAI", _assemblyai_stt, "livekit-plugins-assemblyai",
-        capabilities=stream_stt, secret_env=("ASSEMBLYAI_API_KEY",),
-        options_model=AssemblyAISTTOptions, default_model="universal-streaming-english",
-        health_check=health.assemblyai)
-    add(P.STT, "openai", "OpenAI", _openai_stt, "livekit-plugins-openai",
+        health_check=health.deepgram,
+    )
+    add(
+        P.STT,
+        "assemblyai",
+        "AssemblyAI",
+        _assemblyai_stt,
+        "livekit-plugins-assemblyai",
+        capabilities=stream_stt,
+        secret_env=("ASSEMBLYAI_API_KEY",),
+        options_model=AssemblyAISTTOptions,
+        default_model="universal-streaming-english",
+        health_check=health.assemblyai,
+    )
+    add(
+        P.STT,
+        "openai",
+        "OpenAI",
+        _openai_stt,
+        "livekit-plugins-openai",
         capabilities=Capabilities(streaming=False, notes="batch transcription; needs VAD"),
-        secret_env=("OPENAI_API_KEY",), options_model=OpenAISTTOptions,
-        default_model="gpt-4o-transcribe", health_check=health.openai)
-    add(P.STT, "google", "Google Cloud Speech", _google_stt, "livekit-plugins-google",
-        capabilities=stream_stt, options_model=GoogleSTTOptions, default_model="chirp_2",
-        )
-    add(P.STT, "cartesia", "Cartesia", _cartesia_stt, "livekit-plugins-cartesia",
-        capabilities=stream_stt, secret_env=("CARTESIA_API_KEY",), default_model="ink-whisper",
-        health_check=health.cartesia)
-    add(P.STT, "livekit", "LiveKit Inference", _livekit_stt, "livekit-agents",
-        capabilities=stream_stt, secret_env=("LIVEKIT_API_KEY",),
-        default_model="deepgram/nova-3")
+        secret_env=("OPENAI_API_KEY",),
+        options_model=OpenAISTTOptions,
+        default_model="gpt-4o-transcribe",
+        health_check=health.openai,
+    )
+    add(
+        P.STT,
+        "google",
+        "Google Cloud Speech",
+        _google_stt,
+        "livekit-plugins-google",
+        capabilities=stream_stt,
+        options_model=GoogleSTTOptions,
+        default_model="chirp_2",
+    )
+    add(
+        P.STT,
+        "cartesia",
+        "Cartesia",
+        _cartesia_stt,
+        "livekit-plugins-cartesia",
+        capabilities=stream_stt,
+        secret_env=("CARTESIA_API_KEY",),
+        default_model="ink-whisper",
+        health_check=health.cartesia,
+    )
+    add(
+        P.STT,
+        "livekit",
+        "LiveKit Inference",
+        _livekit_stt,
+        "livekit-agents",
+        capabilities=stream_stt,
+        secret_env=("LIVEKIT_API_KEY",),
+        default_model="deepgram/nova-3",
+    )
 
-    add(P.LLM, "openai", "OpenAI", _openai_llm, "livekit-plugins-openai",
-        secret_env=("OPENAI_API_KEY",), options_model=OpenAILLMOptions,
+    add(
+        P.LLM,
+        "openai",
+        "OpenAI",
+        _openai_llm,
+        "livekit-plugins-openai",
+        secret_env=("OPENAI_API_KEY",),
+        options_model=OpenAILLMOptions,
         default_model="gpt-4.1-mini",
         known_models=("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini"),
-        health_check=health.openai)
-    add(P.LLM, "openai-compatible", "OpenAI-compatible endpoint", _openai_compatible_llm,
-        "livekit-plugins-openai", secret_env=("OPENAI_COMPATIBLE_API_KEY",),
-        options_model=OpenAICompatibleOptions)
-    add(P.LLM, "anthropic", "Anthropic", _anthropic_llm, "livekit-plugins-anthropic",
-        secret_env=("ANTHROPIC_API_KEY",), options_model=AnthropicLLMOptions,
-        default_model="claude-haiku-4-5", health_check=health.anthropic)
-    add(P.LLM, "google", "Google Gemini", _google_llm, "livekit-plugins-google",
-        secret_env=("GOOGLE_API_KEY", "GEMINI_API_KEY"), options_model=GoogleLLMOptions,
-        default_model="gemini-2.5-flash", health_check=health.google_genai)
-    add(P.LLM, "livekit", "LiveKit Inference", _livekit_llm, "livekit-agents",
-        secret_env=("LIVEKIT_API_KEY",), default_model="openai/gpt-4.1-mini")
+        health_check=health.openai,
+    )
+    add(
+        P.LLM,
+        "openai-compatible",
+        "OpenAI-compatible endpoint",
+        _openai_compatible_llm,
+        "livekit-plugins-openai",
+        secret_env=("OPENAI_COMPATIBLE_API_KEY",),
+        options_model=OpenAICompatibleOptions,
+    )
+    add(
+        P.LLM,
+        "anthropic",
+        "Anthropic",
+        _anthropic_llm,
+        "livekit-plugins-anthropic",
+        secret_env=("ANTHROPIC_API_KEY",),
+        options_model=AnthropicLLMOptions,
+        default_model="claude-haiku-4-5",
+        health_check=health.anthropic,
+    )
+    add(
+        P.LLM,
+        "google",
+        "Google Gemini",
+        _google_llm,
+        "livekit-plugins-google",
+        secret_env=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        options_model=GoogleLLMOptions,
+        default_model="gemini-2.5-flash",
+        health_check=health.google_genai,
+    )
+    add(
+        P.LLM,
+        "livekit",
+        "LiveKit Inference",
+        _livekit_llm,
+        "livekit-agents",
+        secret_env=("LIVEKIT_API_KEY",),
+        default_model="openai/gpt-4.1-mini",
+    )
 
-    add(P.TTS, "elevenlabs", "ElevenLabs", _elevenlabs_tts, "livekit-plugins-elevenlabs",
+    add(
+        P.TTS,
+        "elevenlabs",
+        "ElevenLabs",
+        _elevenlabs_tts,
+        "livekit-plugins-elevenlabs",
         capabilities=Capabilities(streaming=True, requires_voice=True),
-        secret_env=("ELEVEN_API_KEY", "ELEVENLABS_API_KEY"), options_model=ElevenLabsTTSOptions,
+        secret_env=("ELEVEN_API_KEY", "ELEVENLABS_API_KEY"),
+        options_model=ElevenLabsTTSOptions,
         default_model="eleven_flash_v2_5",
-        known_models=("eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2",
-                      "eleven_v3"),
-        health_check=health.elevenlabs)
-    add(P.TTS, "cartesia", "Cartesia", _cartesia_tts, "livekit-plugins-cartesia",
+        known_models=(
+            "eleven_flash_v2_5",
+            "eleven_turbo_v2_5",
+            "eleven_multilingual_v2",
+            "eleven_v3",
+        ),
+        health_check=health.elevenlabs,
+    )
+    add(
+        P.TTS,
+        "cartesia",
+        "Cartesia",
+        _cartesia_tts,
+        "livekit-plugins-cartesia",
         capabilities=Capabilities(streaming=True, requires_voice=True),
-        secret_env=("CARTESIA_API_KEY",), options_model=CartesiaTTSOptions,
+        secret_env=("CARTESIA_API_KEY",),
+        options_model=CartesiaTTSOptions,
         default_model="sonic-2",
-        known_models=("sonic", "sonic-2", "sonic-3", "sonic-turbo"), health_check=health.cartesia)
-    add(P.TTS, "deepgram", "Deepgram Aura", _deepgram_tts, "livekit-plugins-deepgram",
+        known_models=("sonic", "sonic-2", "sonic-3", "sonic-turbo"),
+        health_check=health.cartesia,
+    )
+    add(
+        P.TTS,
+        "deepgram",
+        "Deepgram Aura",
+        _deepgram_tts,
+        "livekit-plugins-deepgram",
         capabilities=Capabilities(streaming=True, languages=("en", "es")),
-        secret_env=("DEEPGRAM_API_KEY",), options_model=DeepgramTTSOptions,
-        default_model="aura-2-thalia-en", health_check=health.deepgram)
-    add(P.TTS, "openai", "OpenAI", _openai_tts, "livekit-plugins-openai",
-        capabilities=Capabilities(streaming=True), secret_env=("OPENAI_API_KEY",),
-        options_model=OpenAITTSOptions, default_model="gpt-4o-mini-tts",
-        health_check=health.openai)
-    add(P.TTS, "google", "Google Cloud TTS", _google_tts, "livekit-plugins-google",
+        secret_env=("DEEPGRAM_API_KEY",),
+        options_model=DeepgramTTSOptions,
+        default_model="aura-2-thalia-en",
+        health_check=health.deepgram,
+    )
+    add(
+        P.TTS,
+        "openai",
+        "OpenAI",
+        _openai_tts,
+        "livekit-plugins-openai",
+        capabilities=Capabilities(streaming=True),
+        secret_env=("OPENAI_API_KEY",),
+        options_model=OpenAITTSOptions,
+        default_model="gpt-4o-mini-tts",
+        health_check=health.openai,
+    )
+    add(
+        P.TTS,
+        "google",
+        "Google Cloud TTS",
+        _google_tts,
+        "livekit-plugins-google",
         capabilities=Capabilities(streaming=True, requires_voice=True),
-        options_model=GoogleTTSOptions)
-    add(P.TTS, "livekit", "LiveKit Inference", _livekit_tts, "livekit-agents",
-        secret_env=("LIVEKIT_API_KEY",), default_model="cartesia/sonic-3")
+        options_model=GoogleTTSOptions,
+    )
+    add(
+        P.TTS,
+        "livekit",
+        "LiveKit Inference",
+        _livekit_tts,
+        "livekit-agents",
+        secret_env=("LIVEKIT_API_KEY",),
+        default_model="cartesia/sonic-3",
+    )
 
-    add(P.VAD, "silero", "Silero VAD (local)", _silero_vad, "livekit-plugins-silero",
-        options_model=SileroOptions)
-    add(P.VAD, "livekit", "LiveKit Inference VAD", _livekit_vad, "livekit-agents",
-        options_model=InferenceVADOptions, secret_env=("LIVEKIT_API_KEY",))
+    add(
+        P.VAD,
+        "silero",
+        "Silero VAD (local)",
+        _silero_vad,
+        "livekit-plugins-silero",
+        options_model=SileroOptions,
+    )
+    add(
+        P.VAD,
+        "livekit",
+        "LiveKit Inference VAD",
+        _livekit_vad,
+        "livekit-agents",
+        options_model=InferenceVADOptions,
+        secret_env=("LIVEKIT_API_KEY",),
+    )
 
-    add(P.TURN_DETECTION, "livekit", "LiveKit turn detector (local model)",
-        _livekit_turn_detector, "livekit-plugins-turn-detector",
-        options_model=TurnDetectorOptions, known_models=("english", "multilingual"))
-    add(P.TURN_DETECTION, "livekit-inference", "LiveKit Inference turn detector",
-        _livekit_inference_turn_detector, "livekit-agents", options_model=TurnDetectorOptions,
-        secret_env=("LIVEKIT_API_KEY",))
+    add(
+        P.TURN_DETECTION,
+        "livekit",
+        "LiveKit turn detector (local model)",
+        _livekit_turn_detector,
+        "livekit-plugins-turn-detector",
+        options_model=TurnDetectorOptions,
+        known_models=("english", "multilingual"),
+    )
+    add(
+        P.TURN_DETECTION,
+        "livekit-inference",
+        "LiveKit Inference turn detector",
+        _livekit_inference_turn_detector,
+        "livekit-agents",
+        options_model=TurnDetectorOptions,
+        secret_env=("LIVEKIT_API_KEY",),
+    )
 
-    add(P.REALTIME, "openai-realtime", "OpenAI Realtime", _openai_realtime,
-        "livekit-plugins-openai", secret_env=("OPENAI_API_KEY",),
-        options_model=OpenAIRealtimeOptions, default_model="gpt-realtime",
-        health_check=health.openai)
-    add(P.REALTIME, "google-realtime", "Gemini Live", _google_realtime, "livekit-plugins-google",
-        secret_env=("GOOGLE_API_KEY", "GEMINI_API_KEY"), health_check=health.google_genai)
+    add(
+        P.REALTIME,
+        "openai-realtime",
+        "OpenAI Realtime",
+        _openai_realtime,
+        "livekit-plugins-openai",
+        secret_env=("OPENAI_API_KEY",),
+        options_model=OpenAIRealtimeOptions,
+        default_model="gpt-realtime",
+        health_check=health.openai,
+    )
+    add(
+        P.REALTIME,
+        "google-realtime",
+        "Gemini Live",
+        _google_realtime,
+        "livekit-plugins-google",
+        secret_env=("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        health_check=health.google_genai,
+    )

@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from ..config.schema import AgentConfig, TransferDestination
 from ..integrations.base import TimeSlot
 from ..integrations.registry import IntegrationSet
+from ..knowledge.types import KnowledgeSearch
 from .ledger import ToolLedger
 
 
@@ -27,22 +28,9 @@ class TransferResult:
 class TransferController(Protocol):
     def destinations(self) -> list[TransferDestination]: ...
 
-    async def transfer(self, *, reason: str, destination: str | None, summary: str
-                       ) -> TransferResult: ...
-
-
-@dataclass
-class KnowledgeHit:
-    content: str
-    document_title: str
-    document_id: str
-    chunk_id: str
-    score: float
-    source_uri: str | None = None
-
-
-class KnowledgeSearch(Protocol):
-    async def search(self, query: str, *, top_k: int) -> list[KnowledgeHit]: ...
+    async def transfer(
+        self, *, reason: str, destination: str | None, summary: str
+    ) -> TransferResult: ...
 
 
 @dataclass

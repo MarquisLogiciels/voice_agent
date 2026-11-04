@@ -51,8 +51,9 @@ def _auth(creds: dict[str, Any]) -> Any:
 
 
 class TwilioMessaging:
-    def __init__(self, ctx: IntegrationContext, *, transport: httpx.AsyncBaseTransport | None = None
-                 ) -> None:
+    def __init__(
+        self, ctx: IntegrationContext, *, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
         self.name = ctx.name
         self.cfg = TwilioConfig.model_validate(ctx.config)
         creds = ctx.credentials or {}
@@ -60,14 +61,20 @@ class TwilioMessaging:
             raise IntegrationError(ErrorKind.CONFIGURATION, "Twilio credential missing")
         self.account_sid = creds["account_sid"]
         self.http = IntegrationHttpClient(
-            integration=f"twilio:{ctx.name}", base_url="https://api.twilio.com",
-            egress=TWILIO_EGRESS, auth=_auth(creds), timeout_s=ctx.timeout_s, transport=transport)
+            integration=f"twilio:{ctx.name}",
+            base_url="https://api.twilio.com",
+            egress=TWILIO_EGRESS,
+            auth=_auth(creds),
+            timeout_s=ctx.timeout_s,
+            transport=transport,
+        )
 
     async def aclose(self) -> None:
         await self.http.aclose()
 
-    async def send_sms(self, *, to: str, body: str, from_number: str, idempotency_key: str
-                       ) -> MessageResult:
+    async def send_sms(
+        self, *, to: str, body: str, from_number: str, idempotency_key: str
+    ) -> MessageResult:
         # Twilio's Messages API has no idempotency key; POSTs are therefore never retried on
         # ambiguous failures and duplicate prevention relies on the ToolExecutor's ledger.
         form: dict[str, Any] = {"To": normalize_e164(to), "Body": body[:1600]}
@@ -78,22 +85,40 @@ class TwilioMessaging:
         if self.cfg.status_callback_url:
             form["StatusCallback"] = self.cfg.status_callback_url
         data = await self.http.json(
-            "POST", f"/2010-04-01/Accounts/{self.account_sid}/Messages.json", data=form,
-            operation="messages.create")
+            "POST",
+            f"/2010-04-01/Accounts/{self.account_sid}/Messages.json",
+            data=form,
+            operation="messages.create",
+        )
         return MessageResult(id=data["sid"], status=data.get("status", "queued"))
 
 
 class TwilioTrunking:
     """Provisions an Elastic SIP trunk pointing at LiveKit SIP and attaches phone numbers."""
 
-    def __init__(self, creds: dict[str, Any], *, transport: httpx.AsyncBaseTransport | None = None,
-                 timeout_s: float = 10.0) -> None:
+    def __init__(
+        self,
+        creds: dict[str, Any],
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        timeout_s: float = 10.0,
+    ) -> None:
         self.api = IntegrationHttpClient(
-            integration="twilio:trunking", base_url="https://trunking.twilio.com",
-            egress=TWILIO_EGRESS, auth=_auth(creds), timeout_s=timeout_s, transport=transport)
+            integration="twilio:trunking",
+            base_url="https://trunking.twilio.com",
+            egress=TWILIO_EGRESS,
+            auth=_auth(creds),
+            timeout_s=timeout_s,
+            transport=transport,
+        )
         self.core = IntegrationHttpClient(
-            integration="twilio:core", base_url="https://api.twilio.com", egress=TWILIO_EGRESS,
-            auth=_auth(creds), timeout_s=timeout_s, transport=transport)
+            integration="twilio:core",
+            base_url="https://api.twilio.com",
+            egress=TWILIO_EGRESS,
+            auth=_auth(creds),
+            timeout_s=timeout_s,
+            transport=transport,
+        )
         self.account_sid = creds["account_sid"]
 
     async def aclose(self) -> None:
@@ -102,32 +127,50 @@ class TwilioTrunking:
 
     async def ensure_trunk(self, *, friendly_name: str, livekit_sip_uri: str) -> str:
         """Create (or reuse) a trunk whose origination URL is LiveKit's SIP endpoint."""
-        listing = await self.api.json("GET", "/v1/Trunks", params={"PageSize": 100},
-                                      operation="trunks.list")
+        listing = await self.api.json(
+            "GET", "/v1/Trunks", params={"PageSize": 100}, operation="trunks.list"
+        )
         for trunk in (listing or {}).get("trunks", []):
             if trunk.get("friendly_name") == friendly_name:
                 return str(trunk["sid"])
         trunk = await self.api.json(
-            "POST", "/v1/Trunks", data={"FriendlyName": friendly_name, "TransferMode": "enable-all"},
-            operation="trunks.create")
+            "POST",
+            "/v1/Trunks",
+            data={"FriendlyName": friendly_name, "TransferMode": "enable-all"},
+            operation="trunks.create",
+        )
         await self.api.json(
-            "POST", f"/v1/Trunks/{trunk['sid']}/OriginationUrls",
-            data={"FriendlyName": "livekit", "SipUrl": livekit_sip_uri, "Priority": 1,
-                  "Weight": 1, "Enabled": "true"},
-            operation="trunks.origination")
+            "POST",
+            f"/v1/Trunks/{trunk['sid']}/OriginationUrls",
+            data={
+                "FriendlyName": "livekit",
+                "SipUrl": livekit_sip_uri,
+                "Priority": 1,
+                "Weight": 1,
+                "Enabled": "true",
+            },
+            operation="trunks.origination",
+        )
         return str(trunk["sid"])
 
     async def attach_number(self, trunk_sid: str, e164: str) -> str:
         found = await self.core.json(
-            "GET", f"/2010-04-01/Accounts/{self.account_sid}/IncomingPhoneNumbers.json",
-            params={"PhoneNumber": normalize_e164(e164)}, operation="numbers.lookup")
+            "GET",
+            f"/2010-04-01/Accounts/{self.account_sid}/IncomingPhoneNumbers.json",
+            params={"PhoneNumber": normalize_e164(e164)},
+            operation="numbers.lookup",
+        )
         numbers = (found or {}).get("incoming_phone_numbers", [])
         if not numbers:
             raise IntegrationError(ErrorKind.NOT_FOUND, "phone number not found in Twilio account")
         pn_sid = numbers[0]["sid"]
         try:
-            await self.api.json("POST", f"/v1/Trunks/{trunk_sid}/PhoneNumbers",
-                                data={"PhoneNumberSid": pn_sid}, operation="trunks.attach")
+            await self.api.json(
+                "POST",
+                f"/v1/Trunks/{trunk_sid}/PhoneNumbers",
+                data={"PhoneNumberSid": pn_sid},
+                operation="trunks.attach",
+            )
         except IntegrationError as e:
             if e.kind is not ErrorKind.CONFLICT:
                 raise

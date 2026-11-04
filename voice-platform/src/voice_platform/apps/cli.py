@@ -35,8 +35,14 @@ async def _bootstrap(args: argparse.Namespace) -> None:
                 existing.is_platform_admin = True
                 print("existing user promoted to platform admin")
             else:
-                s.add(User(email=args.email.lower(), password_hash=hash_password(args.password),
-                           full_name=args.name, is_platform_admin=True))
+                s.add(
+                    User(
+                        email=args.email.lower(),
+                        password_hash=hash_password(args.password),
+                        full_name=args.name,
+                        is_platform_admin=True,
+                    )
+                )
                 print("platform admin created")
     finally:
         await services.aclose()
@@ -67,18 +73,23 @@ async def _eval(args: argparse.Namespace) -> int:
     from ..providers.types import BuildContext, ProviderKind
     from .jobs.runner import parse_llm_spec
 
-    cfg = parse_config(yaml.safe_load(Path(args.config).read_text())).materialize(args.env)
+    raw = await asyncio.to_thread(Path(args.config).read_text)
+    cfg = parse_config(yaml.safe_load(raw)).materialize(args.env)
     reg = default_registry()
     assert cfg.pipeline.llm is not None
 
     def make(spec_ref: object) -> object:
         return reg.create(ProviderKind.LLM, spec_ref, BuildContext())  # type: ignore[arg-type]
 
-    judge = LLMJudge(make(parse_llm_spec(args.judge)), model_label=args.judge) if args.judge \
-        else None
-    runner = BenchmarkRunner(agent_llm_factory=lambda c: make(c.pipeline.llm.chain()[0]),  # type: ignore[union-attr]
-                             caller_llm=make(parse_llm_spec(args.caller)), judge=judge,
-                             concurrency=args.concurrency)
+    judge = (
+        LLMJudge(make(parse_llm_spec(args.judge)), model_label=args.judge) if args.judge else None
+    )
+    runner = BenchmarkRunner(
+        agent_llm_factory=lambda c: make(c.pipeline.llm.chain()[0]),  # type: ignore[union-attr]
+        caller_llm=make(parse_llm_spec(args.caller)),
+        judge=judge,
+        concurrency=args.concurrency,
+    )
     scenarios = load_scenarios(args.scenarios)
     if args.only:
         scenarios = [s for s in scenarios if s.id in set(args.only.split(","))]
@@ -86,8 +97,8 @@ async def _eval(args: argparse.Namespace) -> int:
     summary = result.summary()
     print(json.dumps(summary, indent=2, default=str))
     if args.out:
-        Path(args.out).write_text(json.dumps([r.as_row() for r in result.records], indent=2,
-                                             default=str))
+        payload = json.dumps([r.as_row() for r in result.records], indent=2, default=str)
+        await asyncio.to_thread(Path(args.out).write_text, payload)
     return 0 if summary["pass_rate"] >= args.min_pass_rate else 1
 
 

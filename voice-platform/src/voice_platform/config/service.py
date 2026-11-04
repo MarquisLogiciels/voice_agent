@@ -70,17 +70,26 @@ class AgentService:
     ) -> tuple[AgentRow, AgentVersion]:
         parsed = parse_config(config)
         exists = await self.s.scalar(
-            sa.select(AgentRow.id).where(AgentRow.tenant_id == self.tenant_id, AgentRow.slug == slug)
+            sa.select(AgentRow.id).where(
+                AgentRow.tenant_id == self.tenant_id, AgentRow.slug == slug
+            )
         )
         if exists:
             raise ConflictError(f"agent '{slug}' already exists")
         agent = AgentRow(tenant_id=self.tenant_id, slug=slug, name=name, description=description)
         self.s.add(agent)
         await self.s.flush()
-        version = await self._new_version(agent.id, parsed, status="draft", source="manual",
-                                          parent=None, notes="initial draft")
-        await record_audit(self.s, tenant_id=self.tenant_id, actor=self.actor,
-                           action="agent.create", resource_type="agent", resource_id=agent.id)
+        version = await self._new_version(
+            agent.id, parsed, status="draft", source="manual", parent=None, notes="initial draft"
+        )
+        await record_audit(
+            self.s,
+            tenant_id=self.tenant_id,
+            actor=self.actor,
+            action="agent.create",
+            resource_type="agent",
+            resource_id=agent.id,
+        )
         return agent, version
 
     async def get_agent(self, agent_id: uuid.UUID) -> AgentRow:
@@ -105,8 +114,14 @@ class AgentService:
     async def archive_agent(self, agent_id: uuid.UUID) -> None:
         agent = await self.get_agent(agent_id)
         agent.archived_at = datetime.now(UTC)
-        await record_audit(self.s, tenant_id=self.tenant_id, actor=self.actor,
-                           action="agent.archive", resource_type="agent", resource_id=agent_id)
+        await record_audit(
+            self.s,
+            tenant_id=self.tenant_id,
+            actor=self.actor,
+            action="agent.archive",
+            resource_type="agent",
+            resource_id=agent_id,
+        )
 
     # --- versions ----------------------------------------------------------------------------
     async def _next_number(self, agent_id: uuid.UUID) -> int:
@@ -121,8 +136,14 @@ class AgentService:
         return int(current or 0) + 1
 
     async def _new_version(
-        self, agent_id: uuid.UUID, config: AgentConfig, *, status: str, source: str,
-        parent: uuid.UUID | None, notes: str,
+        self,
+        agent_id: uuid.UUID,
+        config: AgentConfig,
+        *,
+        status: str,
+        source: str,
+        parent: uuid.UUID | None,
+        notes: str,
     ) -> AgentVersion:
         data = config.model_dump(mode="json")
         version = AgentVersion(
@@ -164,8 +185,13 @@ class AgentService:
         )
 
     async def create_draft(
-        self, agent_id: uuid.UUID, config: dict[str, Any], *, notes: str = "",
-        parent_version_id: uuid.UUID | None = None, source: str = "manual",
+        self,
+        agent_id: uuid.UUID,
+        config: dict[str, Any],
+        *,
+        notes: str = "",
+        parent_version_id: uuid.UUID | None = None,
+        source: str = "manual",
         status: str = "draft",
     ) -> AgentVersion:
         await self.get_agent(agent_id)
@@ -174,15 +200,23 @@ class AgentService:
             parent = await self.get_version(parent_version_id)
             if parent.agent_id != agent_id:
                 raise ValidationFailedError("parent version belongs to another agent")
-        version = await self._new_version(agent_id, parsed, status=status, source=source,
-                                          parent=parent_version_id, notes=notes)
-        await record_audit(self.s, tenant_id=self.tenant_id, actor=self.actor,
-                           action=f"agent_version.create_{status}", resource_type="agent_version",
-                           resource_id=version.id, details={"version": version.version})
+        version = await self._new_version(
+            agent_id, parsed, status=status, source=source, parent=parent_version_id, notes=notes
+        )
+        await record_audit(
+            self.s,
+            tenant_id=self.tenant_id,
+            actor=self.actor,
+            action=f"agent_version.create_{status}",
+            resource_type="agent_version",
+            resource_id=version.id,
+            details={"version": version.version},
+        )
         return version
 
-    async def update_draft(self, version_id: uuid.UUID, config: dict[str, Any], notes: str | None
-                           ) -> AgentVersion:
+    async def update_draft(
+        self, version_id: uuid.UUID, config: dict[str, Any], notes: str | None
+    ) -> AgentVersion:
         version = await self.get_version(version_id)
         if version.status != "draft":
             raise ConflictError("only drafts can be edited; create a new draft instead")
@@ -206,9 +240,15 @@ class AgentService:
         version.published_at = datetime.now(UTC)
         version.published_by = self._actor_id
         await self.s.flush()
-        await record_audit(self.s, tenant_id=self.tenant_id, actor=self.actor,
-                           action="agent_version.publish", resource_type="agent_version",
-                           resource_id=version.id, details={"version": version.version})
+        await record_audit(
+            self.s,
+            tenant_id=self.tenant_id,
+            actor=self.actor,
+            action="agent_version.publish",
+            resource_type="agent_version",
+            resource_id=version.id,
+            details={"version": version.version},
+        )
         return version
 
     async def reject(self, version_id: uuid.UUID, reason: str) -> AgentVersion:
@@ -235,7 +275,9 @@ class AgentService:
 
     async def list_deployments(self, agent_id: uuid.UUID) -> list[Deployment]:
         return list(
-            (await self.s.scalars(sa.select(Deployment).where(Deployment.agent_id == agent_id))).all()
+            (
+                await self.s.scalars(sa.select(Deployment).where(Deployment.agent_id == agent_id))
+            ).all()
         )
 
     def _check_env(self, environment: str) -> None:
@@ -243,7 +285,11 @@ class AgentService:
             raise ValidationFailedError(f"environment must be one of {ENVIRONMENTS}")
 
     async def deploy(
-        self, agent_id: uuid.UUID, environment: str, version_id: uuid.UUID, *,
+        self,
+        agent_id: uuid.UUID,
+        environment: str,
+        version_id: uuid.UUID,
+        *,
         action: str = "deploy",
     ) -> Deployment:
         self._check_env(environment)
@@ -255,8 +301,12 @@ class AgentService:
         dep = await self.get_deployment(agent_id, environment)
         previous = dep.version_id if dep else None
         if dep is None:
-            dep = Deployment(tenant_id=self.tenant_id, agent_id=agent_id,
-                             environment=environment, version_id=version_id)
+            dep = Deployment(
+                tenant_id=self.tenant_id,
+                agent_id=agent_id,
+                environment=environment,
+                version_id=version_id,
+            )
             self.s.add(dep)
         else:
             dep.version_id = version_id
@@ -264,14 +314,29 @@ class AgentService:
             dep.canary_percent = 0
         dep.updated_by = self._actor_id
         await self.s.flush()
-        self.s.add(DeploymentEvent(tenant_id=self.tenant_id, deployment_id=dep.id, action=action,
-                                   from_version_id=previous, to_version_id=version_id,
-                                   actor_id=self._actor_id))
-        await record_audit(self.s, tenant_id=self.tenant_id, actor=self.actor,
-                           action=f"deployment.{action}", resource_type="deployment",
-                           resource_id=dep.id,
-                           details={"environment": environment, "version_id": str(version_id),
-                                    "previous_version_id": str(previous) if previous else None})
+        self.s.add(
+            DeploymentEvent(
+                tenant_id=self.tenant_id,
+                deployment_id=dep.id,
+                action=action,
+                from_version_id=previous,
+                to_version_id=version_id,
+                actor_id=self._actor_id,
+            )
+        )
+        await record_audit(
+            self.s,
+            tenant_id=self.tenant_id,
+            actor=self.actor,
+            action=f"deployment.{action}",
+            resource_type="deployment",
+            resource_id=dep.id,
+            details={
+                "environment": environment,
+                "version_id": str(version_id),
+                "previous_version_id": str(previous) if previous else None,
+            },
+        )
         return dep
 
     async def set_canary(
@@ -293,13 +358,26 @@ class AgentService:
         dep.canary_percent = percent if version_id else 0
         dep.updated_by = self._actor_id
         await self.s.flush()
-        self.s.add(DeploymentEvent(tenant_id=self.tenant_id, deployment_id=dep.id, action="canary",
-                                   from_version_id=dep.version_id, to_version_id=version_id,
-                                   actor_id=self._actor_id, details={"percent": percent}))
-        await record_audit(self.s, tenant_id=self.tenant_id, actor=self.actor,
-                           action="deployment.canary", resource_type="deployment",
-                           resource_id=dep.id, details={"percent": percent,
-                                                        "version_id": str(version_id)})
+        self.s.add(
+            DeploymentEvent(
+                tenant_id=self.tenant_id,
+                deployment_id=dep.id,
+                action="canary",
+                from_version_id=dep.version_id,
+                to_version_id=version_id,
+                actor_id=self._actor_id,
+                details={"percent": percent},
+            )
+        )
+        await record_audit(
+            self.s,
+            tenant_id=self.tenant_id,
+            actor=self.actor,
+            action="deployment.canary",
+            resource_type="deployment",
+            resource_id=dep.id,
+            details={"percent": percent, "version_id": str(version_id)},
+        )
         return dep
 
     async def promote_canary(self, agent_id: uuid.UUID, environment: str) -> Deployment:
@@ -347,7 +425,11 @@ class AgentService:
         version = await self.get_version(chosen)
         config = parse_config(version.config).materialize(environment)
         return ResolvedVersion(
-            tenant_id=self.tenant_id, agent_id=agent_id, version_id=version.id,
-            version=version.version, environment=environment, config=config,
+            tenant_id=self.tenant_id,
+            agent_id=agent_id,
+            version_id=version.id,
+            version=version.version,
+            environment=environment,
+            config=config,
             is_canary=is_canary,
         )

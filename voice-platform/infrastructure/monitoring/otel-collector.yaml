@@ -1,0 +1,12 @@
+receivers:
+  otlp: {protocols: {http: {endpoint: 0.0.0.0:4318}, grpc: {endpoint: 0.0.0.0:4317}}}
+processors:
+  batch: {}
+  attributes/strip:
+    actions:
+      - {key: http.request.header.authorization, action: delete}
+exporters:
+  otlp/jaeger: {endpoint: jaeger:4317, tls: {insecure: true}}
+service:
+  pipelines:
+    traces: {receivers: [otlp], processors: [attributes/strip, batch], exporters: [otlp/jaeger]}

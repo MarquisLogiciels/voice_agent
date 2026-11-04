@@ -441,7 +441,9 @@ class KnowledgeChunk(Base):
         sa.Computed(
             "to_tsvector('simple', vp_unaccent(content)) || "
             "to_tsvector('english', vp_unaccent(content)) || "
-            "to_tsvector('french', vp_unaccent(content))", persisted=True),
+            "to_tsvector('french', vp_unaccent(content))",
+            persisted=True,
+        ),
     )
     meta: Mapped[dict[str, Any]] = _jsonb()
     created_at: Mapped[datetime] = _created()
@@ -503,7 +505,9 @@ class EvalResult(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     tenant_id: Mapped[uuid.UUID] = _tenant_fk()
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), sa.ForeignKey("eval_runs.id", ondelete="CASCADE"), nullable=False,
+        UUID(as_uuid=True),
+        sa.ForeignKey("eval_runs.id", ondelete="CASCADE"),
+        nullable=False,
         index=True,
     )
     scenario_slug: Mapped[str] = mapped_column(sa.String(100), nullable=False)

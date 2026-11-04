@@ -48,15 +48,25 @@ def parse_llm_spec(spec: str) -> ProviderRef:
 
 
 class JobRunner:
-    def __init__(self, services: Services, *, llm_resolver: LLMResolver | None = None,
-                 worker_id: str | None = None, poll_s: float = 1.0, lease_s: int = 900) -> None:
+    def __init__(
+        self,
+        services: Services,
+        *,
+        llm_resolver: LLMResolver | None = None,
+        worker_id: str | None = None,
+        poll_s: float = 1.0,
+        lease_s: int = 900,
+    ) -> None:
         self.s = services
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self.poll_s = poll_s
         self.lease_s = lease_s
         self._llm_resolver = llm_resolver
         self.handlers: dict[str, Callable[[jobs.ClaimedJob], Awaitable[dict[str, Any]]]] = {
-            INGEST_JOB: self._ingest, EVAL_JOB: self._evaluate, OPTIMIZE_JOB: self._optimize}
+            INGEST_JOB: self._ingest,
+            EVAL_JOB: self._evaluate,
+            OPTIMIZE_JOB: self._optimize,
+        }
 
     # --- loop --------------------------------------------------------------------------------
     async def run_forever(self, stop: asyncio.Event) -> None:
@@ -73,26 +83,32 @@ class JobRunner:
 
     async def run_once(self) -> bool:
         async with self.s.db.session(DbScope.system()) as sess:
-            job = await jobs.claim(sess, worker_id=self.worker_id, kinds=list(self.handlers),
-                                   lease_s=self.lease_s)
+            job = await jobs.claim(
+                sess, worker_id=self.worker_id, kinds=list(self.handlers), lease_s=self.lease_s
+            )
         if job is None:
             return False
         started = time.perf_counter()
         heartbeat = asyncio.create_task(self._heartbeat(job.id))
-        with log_context(job_id=str(job.id), job_kind=job.kind,
-                         tenant_id=str(job.tenant_id) if job.tenant_id else None):
+        with log_context(
+            job_id=str(job.id),
+            job_kind=job.kind,
+            tenant_id=str(job.tenant_id) if job.tenant_id else None,
+        ):
             try:
                 result = await self.handlers[job.kind](job)
                 async with self.s.db.session(DbScope.system()) as sess:
                     await jobs.complete(sess, job.id, result)
                 JOBS.labels(job.kind, "succeeded").inc()
             except Exception as e:
-                retryable = not isinstance(e, ValidationFailedError | ConfigurationError |
-                                           NotFoundError)
+                retryable = not isinstance(
+                    e, ValidationFailedError | ConfigurationError | NotFoundError
+                )
                 logger.exception("job failed", extra={"retryable": retryable})
                 async with self.s.db.session(DbScope.system()) as sess:
-                    status = await jobs.fail(sess, job, f"{type(e).__name__}: {e}",
-                                             retryable=retryable)
+                    status = await jobs.fail(
+                        sess, job, f"{type(e).__name__}: {e}", retryable=retryable
+                    )
                 JOBS.labels(job.kind, status).inc()
             finally:
                 heartbeat.cancel()
@@ -111,8 +127,7 @@ class JobRunner:
     # --- handlers ----------------------------------------------------------------------------
     async def _ingest(self, job: jobs.ClaimedJob) -> dict[str, Any]:
         assert job.tenant_id is not None
-        return await self.s.knowledge.process(job.tenant_id,
-                                              uuid.UUID(job.payload["document_id"]))
+        return await self.s.knowledge.process(job.tenant_id, uuid.UUID(job.payload["document_id"]))
 
     def _llm(self, ref: ProviderRef, secrets: dict[str, Any]) -> Any:
         if self._llm_resolver is not None:
@@ -126,29 +141,35 @@ class JobRunner:
         async with self.s.db.session(DbScope.for_tenant(tenant_id)) as sess:
             for ref in cfg.pipeline.llm.chain():
                 if ref.credential and ref.credential not in out:
-                    _k, payload = await self.s.vault.resolve_by_name(sess, tenant_id=tenant_id,
-                                                                     name=ref.credential)
+                    _k, payload = await self.s.vault.resolve_by_name(
+                        sess, tenant_id=tenant_id, name=ref.credential
+                    )
                     out[ref.credential] = payload
         return out
 
-    async def _scenarios(self, tenant_id: uuid.UUID, suite: str, slugs: list[str]
-                         ) -> list[Scenario]:
+    async def _scenarios(
+        self, tenant_id: uuid.UUID, suite: str, slugs: list[str]
+    ) -> list[Scenario]:
         found: dict[str, Scenario] = {}
         lib = Path(self.s.settings.scenario_library_path) / suite
         if lib.exists():
             for sc in load_scenarios(lib):
                 found[sc.id] = sc
         async with self.s.db.session(DbScope.for_tenant(tenant_id)) as sess:
-            for row in (await sess.scalars(sa.select(EvalScenario).where(
-                    EvalScenario.tenant_id == tenant_id))).all():
+            for row in (
+                await sess.scalars(
+                    sa.select(EvalScenario).where(EvalScenario.tenant_id == tenant_id)
+                )
+            ).all():
                 found[row.slug] = Scenario.model_validate(row.spec)
         chosen = [found[s] for s in slugs if s in found] if slugs else list(found.values())
         if not chosen:
             raise ValidationFailedError("no scenarios selected")
         return chosen
 
-    def _runner(self, cfg: AgentConfig, secrets: dict[str, Any], *, use_judge: bool
-                ) -> tuple[BenchmarkRunner, dict[str, Any]]:
+    def _runner(
+        self, cfg: AgentConfig, secrets: dict[str, Any], *, use_judge: bool
+    ) -> tuple[BenchmarkRunner, dict[str, Any]]:
         if cfg.pipeline.mode is not PipelineMode.CASCADED or cfg.pipeline.llm is None:
             raise ValidationFailedError("text-mode evaluation requires a cascaded pipeline")
         agent_ref = cfg.pipeline.llm.chain()[0]
@@ -160,13 +181,14 @@ class JobRunner:
             if (judge_ref.provider, judge_ref.model) == (agent_ref.provider, agent_ref.model):
                 notes["judge"] = "skipped: judge model equals the agent model (independence)"
             else:
-                judge = LLMJudge(self._llm(judge_ref, {}),
-                                 model_label=self.s.settings.judge_llm)
+                judge = LLMJudge(self._llm(judge_ref, {}), model_label=self.s.settings.judge_llm)
                 notes["judge"] = self.s.settings.judge_llm
         runner = BenchmarkRunner(
             agent_llm_factory=lambda c: self._llm(c.pipeline.llm.chain()[0], secrets),  # type: ignore[union-attr]
-            caller_llm=self._llm(caller_ref, {}), judge=judge,
-            concurrency=self.s.settings.eval_max_concurrency)
+            caller_llm=self._llm(caller_ref, {}),
+            judge=judge,
+            concurrency=self.s.settings.eval_max_concurrency,
+        )
         return runner, notes
 
     async def _evaluate(self, job: jobs.ClaimedJob) -> dict[str, Any]:
@@ -190,16 +212,26 @@ class JobRunner:
             result = await runner.run(cfg, scenarios, repetitions=reps, seed=seed)
         except Exception as e:
             async with self.s.db.session(DbScope.for_tenant(tid)) as sess:
-                await sess.execute(sa.update(EvalRun).where(EvalRun.id == run_id).values(
-                    status="failed", error=f"{type(e).__name__}: {e}"[:2000],
-                    finished_at=datetime.now(UTC)))
+                await sess.execute(
+                    sa.update(EvalRun)
+                    .where(EvalRun.id == run_id)
+                    .values(
+                        status="failed",
+                        error=f"{type(e).__name__}: {e}"[:2000],
+                        finished_at=datetime.now(UTC),
+                    )
+                )
             raise
         summary = {**result.summary(), "notes": notes}
         async with self.s.db.session(DbScope.for_tenant(tid)) as sess:
-            sess.add_all([EvalResult(tenant_id=tid, run_id=run_id, **rec.as_row())
-                          for rec in result.records])
-            await sess.execute(sa.update(EvalRun).where(EvalRun.id == run_id).values(
-                status="succeeded", summary=summary, finished_at=datetime.now(UTC)))
+            sess.add_all(
+                [EvalResult(tenant_id=tid, run_id=run_id, **rec.as_row()) for rec in result.records]
+            )
+            await sess.execute(
+                sa.update(EvalRun)
+                .where(EvalRun.id == run_id)
+                .values(status="succeeded", summary=summary, finished_at=datetime.now(UTC))
+            )
         return {"pass_rate": summary["pass_rate"], "runs": summary["runs"]}
 
     async def _optimize(self, job: jobs.ClaimedJob) -> dict[str, Any]:
@@ -217,26 +249,41 @@ class JobRunner:
             agent_id, baseline_id = opt.agent_id, baseline.id
         try:
             eval_cfg = base_cfg.materialize("staging")
-            scenarios = await self._scenarios(tid, "receptionist",
-                                              list(settings.get("scenario_slugs") or []))
+            scenarios = await self._scenarios(
+                tid, "receptionist", list(settings.get("scenario_slugs") or [])
+            )
             secrets = await self._tenant_secrets(tid, eval_cfg)
             runner, notes = self._runner(eval_cfg, secrets, use_judge=False)
             allowed = {k: tuple(v) for k, v in (settings.get("allowed_models") or {}).items()}
             proposers: list[Proposer] = [HeuristicProposer()]
             if self.s.settings.optimizer_llm:
-                proposers.append(LLMProposer(self._llm(parse_llm_spec(
-                    self.s.settings.optimizer_llm), {}), allowed_models=allowed))
+                proposers.append(
+                    LLMProposer(
+                        self._llm(parse_llm_spec(self.s.settings.optimizer_llm), {}),
+                        allowed_models=allowed,
+                    )
+                )
             optimizer = Optimizer(
-                runner, proposers, policy=PatchPolicy(allowed_models=allowed),
+                runner,
+                proposers,
+                policy=PatchPolicy(allowed_models=allowed),
                 thresholds=GateThresholds(min_pass_rate=float(settings.get("min_pass_rate", 0.8))),
-                repetitions=int(settings.get("repetitions", 1)), seed=int(settings.get("seed", 0)),
-                max_iterations=int(settings.get("max_iterations", 3)))
+                repetitions=int(settings.get("repetitions", 1)),
+                seed=int(settings.get("seed", 0)),
+                max_iterations=int(settings.get("max_iterations", 3)),
+            )
             outcome = await optimizer.run(eval_cfg, scenarios)
         except Exception as e:
             async with self.s.db.session(DbScope.for_tenant(tid)) as sess:
-                await sess.execute(sa.update(OptimizationRun).where(OptimizationRun.id == opt_id)
-                                   .values(status="failed", error=f"{type(e).__name__}: {e}"[:2000],
-                                           finished_at=datetime.now(UTC)))
+                await sess.execute(
+                    sa.update(OptimizationRun)
+                    .where(OptimizationRun.id == opt_id)
+                    .values(
+                        status="failed",
+                        error=f"{type(e).__name__}: {e}"[:2000],
+                        finished_at=datetime.now(UTC),
+                    )
+                )
             raise
         candidate_id = None
         async with self.s.db.session(DbScope.for_tenant(tid)) as sess:
@@ -246,22 +293,35 @@ class JobRunner:
                 from ...optimization.patches import apply_patches
 
                 accepted = [p for it in outcome.iterations if it.kept for p in it.patches_applied]
-                cand_cfg, _applied, _rej = apply_patches(base_cfg, accepted,
-                                                         PatchPolicy(allowed_models=allowed))
+                cand_cfg, _applied, _rej = apply_patches(
+                    base_cfg, accepted, PatchPolicy(allowed_models=allowed)
+                )
                 v = await AgentService(sess, tid, None).create_draft(
-                    agent_id, cand_cfg.model_dump(mode="json"), parent_version_id=baseline_id,
-                    source="optimizer", status="candidate",
-                    notes=f"optimizer run {opt_id}: decision {outcome.decision}")
+                    agent_id,
+                    cand_cfg.model_dump(mode="json"),
+                    parent_version_id=baseline_id,
+                    source="optimizer",
+                    status="candidate",
+                    notes=f"optimizer run {opt_id}: decision {outcome.decision}",
+                )
                 candidate_id = v.id
-            await sess.execute(sa.update(OptimizationRun).where(OptimizationRun.id == opt_id)
-                               .values(status="succeeded", decision=outcome.decision,
-                                       report={**outcome.report(), "notes": notes},
-                                       report_markdown=outcome.markdown(),
-                                       iterations=[i.as_dict() for i in outcome.iterations],
-                                       best_candidate_version_id=candidate_id,
-                                       finished_at=datetime.now(UTC)))
-        return {"decision": outcome.decision,
-                "candidate_version_id": str(candidate_id) if candidate_id else None}
+            await sess.execute(
+                sa.update(OptimizationRun)
+                .where(OptimizationRun.id == opt_id)
+                .values(
+                    status="succeeded",
+                    decision=outcome.decision,
+                    report={**outcome.report(), "notes": notes},
+                    report_markdown=outcome.markdown(),
+                    iterations=[i.as_dict() for i in outcome.iterations],
+                    best_candidate_version_id=candidate_id,
+                    finished_at=datetime.now(UTC),
+                )
+            )
+        return {
+            "decision": outcome.decision,
+            "candidate_version_id": str(candidate_id) if candidate_id else None,
+        }
 
 
 async def main() -> None:
@@ -272,6 +332,13 @@ async def main() -> None:
 
     settings = get_settings()
     configure_logging(level=settings.log_level, json_output=settings.log_json, service="vp-jobs")
+    from ...observability.tracing_setup import configure_tracing
+
+    configure_tracing(
+        service="vp-jobs",
+        endpoint=settings.otel_exporter_otlp_endpoint,
+        environment=settings.environment.value,
+    )
     services = Services.from_settings(settings)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -283,4 +350,4 @@ async def main() -> None:
         await services.aclose()
 
 
-__all__ = ["JobRunner", "main", "AgentVersion"]
+__all__ = ["AgentVersion", "JobRunner", "main"]

@@ -31,10 +31,15 @@ async def route_inbound(db: Database, dialed_number: str) -> InboundRoute | None
     if not e164:
         return None
     async with db.session(DbScope()) as s:
-        row = (await s.execute(sa.text("select * from vp_route_inbound_number(:n)"),
-                               {"n": e164})).first()
+        row = (
+            await s.execute(sa.text("select * from vp_route_inbound_number(:n)"), {"n": e164})
+        ).first()
     if row is None:
         return None
-    return InboundRoute(tenant_id=row.tenant_id, agent_id=row.agent_id,
-                        environment=row.environment, phone_number_id=row.phone_number_id,
-                        dialed_number=e164)
+    return InboundRoute(
+        tenant_id=row.tenant_id,
+        agent_id=row.agent_id,
+        environment=row.environment,
+        phone_number_id=row.phone_number_id,
+        dialed_number=e164,
+    )

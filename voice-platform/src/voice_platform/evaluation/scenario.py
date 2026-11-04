@@ -70,8 +70,9 @@ class Expectations(_M):
 class TransferSim(_M):
     """How the simulated telephony layer responds to transfer attempts, per destination."""
 
-    outcomes: dict[str, Literal["completed", "busy", "no_answer", "rejected", "unavailable"]
-                   ] = Field(default_factory=dict)
+    outcomes: dict[str, Literal["completed", "busy", "no_answer", "rejected", "unavailable"]] = (
+        Field(default_factory=dict)
+    )
 
 
 class Scenario(_M):

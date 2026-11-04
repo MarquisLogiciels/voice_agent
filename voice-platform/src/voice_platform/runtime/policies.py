@@ -42,8 +42,9 @@ class SilencePolicy:
     async def _handle_away(self) -> None:
         try:
             if self.reprompts < self.cfg.max_reprompts and self.cfg.reprompt_messages:
-                msg = self.cfg.reprompt_messages[min(self.reprompts,
-                                                     len(self.cfg.reprompt_messages) - 1)]
+                msg = self.cfg.reprompt_messages[
+                    min(self.reprompts, len(self.cfg.reprompt_messages) - 1)
+                ]
                 self.reprompts += 1
                 self.session.say(msg, allow_interruptions=True)
                 return

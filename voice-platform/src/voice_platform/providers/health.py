@@ -40,13 +40,13 @@ async def openai(key: str) -> None:
 
 
 async def anthropic(key: str) -> None:
-    await _probe("https://api.anthropic.com/v1/models",
-                 {"x-api-key": key, "anthropic-version": "2023-06-01"})
+    await _probe(
+        "https://api.anthropic.com/v1/models", {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    )
 
 
 async def google_genai(key: str) -> None:
-    await _probe("https://generativelanguage.googleapis.com/v1beta/models",
-                 {"x-goog-api-key": key})
+    await _probe("https://generativelanguage.googleapis.com/v1beta/models", {"x-goog-api-key": key})
 
 
 async def deepgram(key: str) -> None:
@@ -62,8 +62,9 @@ async def elevenlabs(key: str) -> None:
 
 
 async def cartesia(key: str) -> None:
-    await _probe("https://api.cartesia.ai/voices",
-                 {"X-API-Key": key, "Cartesia-Version": "2024-11-13"})
+    await _probe(
+        "https://api.cartesia.ai/voices", {"X-API-Key": key, "Cartesia-Version": "2024-11-13"}
+    )
 
 
 @dataclass
@@ -84,7 +85,10 @@ class ProviderHealthTracker:
     """
 
     def __init__(
-        self, *, failure_threshold: int = 3, recovery_timeout_s: float = 60.0,
+        self,
+        *,
+        failure_threshold: int = 3,
+        recovery_timeout_s: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._threshold = failure_threshold
@@ -97,16 +101,22 @@ class ProviderHealthTracker:
     def _breaker(self, key: str) -> CircuitBreaker:
         br = self._breakers.get(key)
         if br is None:
-            br = CircuitBreaker(key, failure_threshold=self._threshold,
-                                recovery_timeout_s=self._recovery, clock=self._clock)
+            br = CircuitBreaker(
+                key,
+                failure_threshold=self._threshold,
+                recovery_timeout_s=self._recovery,
+                clock=self._clock,
+            )
             self._breakers[key] = br
         return br
 
     def record_failure(self, key: str) -> None:
         self._breaker(key).record_failure()
         self._last_failure[key] = time.time()
-        logger.warning("provider failure recorded", extra={"provider_key": key,
-                       "state": self._breaker(key).state.value})
+        logger.warning(
+            "provider failure recorded",
+            extra={"provider_key": key, "state": self._breaker(key).state.value},
+        )
 
     def record_success(self, key: str) -> None:
         br = self._breaker(key)
@@ -128,9 +138,13 @@ class ProviderHealthTracker:
 
     def snapshot(self) -> list[ProviderHealth]:
         return [
-            ProviderHealth(key=k, state=b.state.value, consecutive_failures=b.consecutive_failures,
-                           last_failure_at=self._last_failure.get(k),
-                           last_success_at=self._last_success.get(k))
+            ProviderHealth(
+                key=k,
+                state=b.state.value,
+                consecutive_failures=b.consecutive_failures,
+                last_failure_at=self._last_failure.get(k),
+                last_success_at=self._last_success.get(k),
+            )
             for k, b in sorted(self._breakers.items())
         ]
 

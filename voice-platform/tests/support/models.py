@@ -37,8 +37,10 @@ def _french(t: Turn) -> bool:
 def _name(t: Turn) -> str:
     for item in reversed(t.history):
         if item.type == "message" and item.role == "user":
-            m = re.search(r"(?i:my name is|i'?m|je m'appelle)\s+([A-Z][a-zé]+(?: [A-Z][a-z]+)?)",
-                          item.text_content or "")
+            m = re.search(
+                r"(?i:my name is|i'?m|je m'appelle)\s+([A-Z][a-zé]+(?: [A-Z][a-z]+)?)",
+                item.text_content or "",
+            )
             if m:
                 return m.group(1)
     return "Caller"
@@ -56,8 +58,9 @@ def receptionist_model(*, competent: bool | None = None) -> ScriptedLLM:
         if re.search(r"changed my mind|don'?t book", t.user_text, re.I):
             return Reply(text="No problem, I won't book anything. Call us anytime.")
         m = DATE.search(t.user_text)
-        if not m or not re.search(r"book|appointment|rendez-vous|anything on|cleaning|checkup",
-                                  t.user_text, re.I):
+        if not m or not re.search(
+            r"book|appointment|rendez-vous|anything on|cleaning|checkup", t.user_text, re.I
+        ):
             if re.search(r"appointment", t.user_text, re.I):
                 return Reply(text="Sure, which day would you like?")
             return None
@@ -67,18 +70,27 @@ def receptionist_model(*, competent: bool | None = None) -> ScriptedLLM:
 
     def availability(out: dict[str, Any], t: Turn) -> Reply:
         if not out.get("ok"):
-            return Reply(text="Sorry, I can't reach our calendar right now. Can a team member "
-                         "call you back?")
+            return Reply(
+                text="Sorry, I can't reach our calendar right now. Can a team member call you back?"
+            )
         slots = out["data"]["slots"]
         if not slots:
             return Reply(text="Sorry, there are no openings that day. Would another day work?")
         fr = bool(re.search(r"[àéè]", out["data"]["slots"][0]["spoken"]))
-        return Reply(text=(f"J'ai {slots[0]['spoken']}. Quel est votre nom?" if fr else
-                           f"I have {slots[0]['spoken']}. May I have your name?"))
+        return Reply(
+            text=(
+                f"J'ai {slots[0]['spoken']}. Quel est votre nom?"
+                if fr
+                else f"I have {slots[0]['spoken']}. May I have your name?"
+            )
+        )
 
     def name_given(t: Turn) -> Reply | None:
-        if t.tool_name or not t.user_text or not re.search(
-                r"(?i:my name is|je m'appelle)|i'?m [A-Z]", t.user_text):
+        if (
+            t.tool_name
+            or not t.user_text
+            or not re.search(r"(?i:my name is|je m'appelle)|i'?m [A-Z]", t.user_text)
+        ):
             return None
         slots = _last_output(t, "check_availability").get("data", {}).get("slots", [])
         if not slots:
@@ -90,14 +102,29 @@ def receptionist_model(*, competent: bool | None = None) -> ScriptedLLM:
         return Reply(text=f"Great, shall I book {slots[0]['spoken']}?")
 
     def confirmed(t: Turn) -> Reply | None:
-        if t.tool_name or not t.user_text or not re.match(
-                r"\s*(yes|oui|the first one|la première|that's correct)", t.user_text, re.I):
+        if (
+            t.tool_name
+            or not t.user_text
+            or not re.match(
+                r"\s*(yes|oui|the first one|la première|that's correct)", t.user_text, re.I
+            )
+        ):
             return None
         slots = _last_output(t, "check_availability").get("data", {}).get("slots", [])
         if slots and follows(t, CONFIRM_BOOK):
-            return Reply(tool_calls=[("book_appointment", {
-                "start": slots[0]["start"], "attendee_name": _name(t),
-                "reason": "Cleaning", "caller_confirmed": True})])
+            return Reply(
+                tool_calls=[
+                    (
+                        "book_appointment",
+                        {
+                            "start": slots[0]["start"],
+                            "attendee_name": _name(t),
+                            "reason": "Cleaning",
+                            "caller_confirmed": True,
+                        },
+                    )
+                ]
+            )
         if follows(t, NO_FALSE_CLAIMS):
             return Reply(text="I'll ask a team member to finalize that booking with you.")
         return Reply(text="You're all booked! See you then.")
@@ -108,24 +135,54 @@ def receptionist_model(*, competent: bool | None = None) -> ScriptedLLM:
         return Reply(text="Sorry, I couldn't complete the booking. Let me find another time.")
 
     rules: list[Rule] = [
-        when_user(r"person|human|someone|real|manager",
-                  lambda m, t: Reply(tool_calls=[("transfer_to_human", {
-                      "reason": "caller requested a person",
-                      "summary": "Caller asked to speak with staff about their request."})])),
-        after_tool("transfer_to_human", lambda out, t: Reply(
-            text="Connecting you now." if out.get("ok") else
-            "I'm sorry, nobody is available. Can I take a message?")),
-        when_user(r"my file|my account|have my", lambda m, t: Reply(
-            tool_calls=[("lookup_customer", {})])),
-        after_tool("lookup_customer", lambda out, t: Reply(
-            text="I found your file." if out.get("ok") and out["data"]["found"] else
-            "I'm sorry, I can't access customer records right now. Can I take a message?")),
-        when_user(r"how much|price|cost|combien", lambda m, t: Reply(
-            tool_calls=[("search_knowledge_base", {"query": t.user_text})])),
-        after_tool("search_knowledge_base", lambda out, t: Reply(
-            text=("According to our price list: " + out["data"]["results"][0]["excerpt"]
-                  .split("\n")[-1]) if out.get("ok") and out["data"]["results"] else
-            "I'm not sure; I can have someone call you back.")),
+        when_user(
+            r"person|human|someone|real|manager",
+            lambda m, t: Reply(
+                tool_calls=[
+                    (
+                        "transfer_to_human",
+                        {
+                            "reason": "caller requested a person",
+                            "summary": "Caller asked to speak with staff about their request.",
+                        },
+                    )
+                ]
+            ),
+        ),
+        after_tool(
+            "transfer_to_human",
+            lambda out, t: Reply(
+                text="Connecting you now."
+                if out.get("ok")
+                else "I'm sorry, nobody is available. Can I take a message?"
+            ),
+        ),
+        when_user(
+            r"my file|my account|have my", lambda m, t: Reply(tool_calls=[("lookup_customer", {})])
+        ),
+        after_tool(
+            "lookup_customer",
+            lambda out, t: Reply(
+                text="I found your file."
+                if out.get("ok") and out["data"]["found"]
+                else "I'm sorry, I can't access customer records right now. Can I take a message?"
+            ),
+        ),
+        when_user(
+            r"how much|price|cost|combien",
+            lambda m, t: Reply(tool_calls=[("search_knowledge_base", {"query": t.user_text})]),
+        ),
+        after_tool(
+            "search_knowledge_base",
+            lambda out, t: Reply(
+                text=(
+                    "According to our price list: "
+                    + out["data"]["results"][0]["excerpt"].split("\n")[-1]
+                )
+                if out.get("ok") and out["data"]["results"]
+                else "I'm not sure; I can have someone call you back."
+            ),
+        ),
         Rule(booking_request, "booking_request"),
         after_tool("check_availability", availability),
         Rule(name_given, "name_given"),

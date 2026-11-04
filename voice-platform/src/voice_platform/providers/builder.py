@@ -45,7 +45,10 @@ class PipelineBuilder:
     # validation
     # ------------------------------------------------------------------------------------
     def validate(
-        self, pipeline: PipelineConfig, ctx: BuildContext | None = None, *,
+        self,
+        pipeline: PipelineConfig,
+        ctx: BuildContext | None = None,
+        *,
         check_secrets: bool = True,
     ) -> list[Problem]:
         problems: list[Problem] = []
@@ -59,8 +62,11 @@ class PipelineBuilder:
                 problems.extend(reg.validate_ref(kind, ref, p, ctx, check_secrets=check_secrets))
 
         if pipeline.vad is not None:
-            problems.extend(reg.validate_ref(ProviderKind.VAD, pipeline.vad, "pipeline.vad", ctx,
-                                             check_secrets=check_secrets))
+            problems.extend(
+                reg.validate_ref(
+                    ProviderKind.VAD, pipeline.vad, "pipeline.vad", ctx, check_secrets=check_secrets
+                )
+            )
         if pipeline.mode is PipelineMode.CASCADED:
             chain(ProviderKind.STT, pipeline.stt, "pipeline.stt")
             chain(ProviderKind.LLM, pipeline.llm, "pipeline.llm")
@@ -72,12 +78,23 @@ class PipelineBuilder:
                 caps = reg.get(ProviderKind.STT, ref.provider).capabilities
                 path = "pipeline.stt" if i == 0 else f"pipeline.stt.fallbacks[{i - 1}]"
                 if not caps.streaming and pipeline.vad is None:
-                    problems.append(Problem(path, f"{ref.provider} STT is not streaming and needs "
-                                            "a VAD (pipeline.vad)"))
-                if (pipeline.turn_detection.mode is TurnDetectionMode.STT
-                        and not caps.emits_end_of_speech):
-                    problems.append(Problem(path, f"{ref.provider} STT does not emit end-of-speech;"
-                                            " turn_detection mode 'stt' will not work"))
+                    problems.append(
+                        Problem(
+                            path,
+                            f"{ref.provider} STT is not streaming and needs a VAD (pipeline.vad)",
+                        )
+                    )
+                if (
+                    pipeline.turn_detection.mode is TurnDetectionMode.STT
+                    and not caps.emits_end_of_speech
+                ):
+                    problems.append(
+                        Problem(
+                            path,
+                            f"{ref.provider} STT does not emit end-of-speech;"
+                            " turn_detection mode 'stt' will not work",
+                        )
+                    )
         else:
             chain(ProviderKind.REALTIME, pipeline.realtime, "pipeline.realtime")
             chain(ProviderKind.TTS, pipeline.realtime_tts, "pipeline.realtime_tts")
@@ -85,12 +102,19 @@ class PipelineBuilder:
         td = pipeline.turn_detection
         if td.mode is TurnDetectionMode.MODEL:
             if pipeline.vad is None:
-                problems.append(Problem("pipeline.turn_detection",
-                                        "model-based turn detection requires a VAD"))
+                problems.append(
+                    Problem("pipeline.turn_detection", "model-based turn detection requires a VAD")
+                )
             ref = ProviderRef(provider=td.provider or "livekit", model=td.model, options=td.options)
-            problems.extend(reg.validate_ref(ProviderKind.TURN_DETECTION, ref,
-                                             "pipeline.turn_detection", ctx,
-                                             check_secrets=check_secrets))
+            problems.extend(
+                reg.validate_ref(
+                    ProviderKind.TURN_DETECTION,
+                    ref,
+                    "pipeline.turn_detection",
+                    ctx,
+                    check_secrets=check_secrets,
+                )
+            )
         return problems
 
     # ------------------------------------------------------------------------------------
@@ -104,8 +128,7 @@ class PipelineBuilder:
         fatal = [p for p in errors if ".fallbacks[" not in p.path]
         if fatal:
             raise ProviderError("; ".join(f"{p.path}: {p.message}" for p in fatal))
-        out = BuiltPipeline(mode=pipeline.mode,
-                            warnings=[p for p in problems if p not in fatal])
+        out = BuiltPipeline(mode=pipeline.mode, warnings=[p for p in problems if p not in fatal])
 
         vad = ctx.vad
         if vad is None and pipeline.vad is not None:
@@ -142,13 +165,16 @@ class PipelineBuilder:
             if spec is None:
                 return APIConnectOptions()
             c = spec.connection
-            return APIConnectOptions(max_retry=c.max_retries, retry_interval=c.retry_interval_s,
-                                     timeout=c.timeout_s)
+            return APIConnectOptions(
+                max_retry=c.max_retries, retry_interval=c.retry_interval_s, timeout=c.timeout_s
+            )
 
         llm_spec = pipeline.llm if pipeline.mode is PipelineMode.CASCADED else pipeline.realtime
-        return SessionConnectOptions(stt_conn_options=opts(pipeline.stt),
-                                     llm_conn_options=opts(llm_spec),
-                                     tts_conn_options=opts(pipeline.tts or pipeline.realtime_tts))
+        return SessionConnectOptions(
+            stt_conn_options=opts(pipeline.stt),
+            llm_conn_options=opts(llm_spec),
+            tts_conn_options=opts(pipeline.tts or pipeline.realtime_tts),
+        )
 
     def _build_chain(
         self, kind: ProviderKind, spec: ProviderSpec, ctx: BuildContext, out: BuiltPipeline
@@ -163,8 +189,9 @@ class PipelineBuilder:
             except (ProviderError, ValueError) as e:
                 if ref is ordered[0] and len(ordered) == 1:
                     raise ProviderError(f"{kind.value}: {e}") from e
-                out.warnings.append(Problem(f"pipeline.{kind.value}", f"skipped {key}: {e}",
-                                            "warning"))
+                out.warnings.append(
+                    Problem(f"pipeline.{kind.value}", f"skipped {key}: {e}", "warning")
+                )
                 continue
             if kind is ProviderKind.STT and not inst.capabilities.streaming:
                 from livekit.agents import stt as lk_stt
@@ -183,7 +210,11 @@ class PipelineBuilder:
         return self._fallback(kind, instances, keys, spec, ctx)
 
     def _fallback(
-        self, kind: ProviderKind, instances: list[Any], keys: list[str], spec: ProviderSpec,
+        self,
+        kind: ProviderKind,
+        instances: list[Any],
+        keys: list[str],
+        spec: ProviderSpec,
         ctx: BuildContext,
     ) -> Any:
         c = spec.connection
@@ -191,15 +222,20 @@ class PipelineBuilder:
             from livekit.agents import stt as lk_stt
 
             adapter: Any = lk_stt.FallbackAdapter(
-                instances, vad=ctx.vad, attempt_timeout=c.timeout_s,
-                max_retry_per_stt=c.max_retries, retry_interval=max(c.retry_interval_s, 0.5),
+                instances,
+                vad=ctx.vad,
+                attempt_timeout=c.timeout_s,
+                max_retry_per_stt=c.max_retries,
+                retry_interval=max(c.retry_interval_s, 0.5),
             )
             event = "stt_availability_changed"
         elif kind is ProviderKind.LLM:
             from livekit.agents import llm as lk_llm
 
             adapter = lk_llm.FallbackAdapter(
-                instances, attempt_timeout=c.timeout_s, max_retry_per_llm=c.max_retries,
+                instances,
+                attempt_timeout=c.timeout_s,
+                max_retry_per_llm=c.max_retries,
                 retry_interval=c.retry_interval_s,
             )
             event = "llm_availability_changed"
@@ -224,8 +260,10 @@ class PipelineBuilder:
                 self.tracker.record_success(key)
             else:
                 self.tracker.record_failure(key)
-            logger.warning("provider availability changed",
-                           extra={"provider_key": key, "available": ev.available})
+            logger.warning(
+                "provider availability changed",
+                extra={"provider_key": key, "available": ev.available},
+            )
 
         adapter.on(event, on_availability)
         return adapter
@@ -234,6 +272,7 @@ class PipelineBuilder:
         on = getattr(inst, "on", None)
         if on is None:
             return
+
         def on_error(ev: Any) -> None:
             # Recoverable errors are being retried by LiveKit; only final failures count.
             if not getattr(ev, "recoverable", False):

@@ -61,7 +61,7 @@ class _Shared:
     state: SandboxState
     log: list[OperationRecord] = field(default_factory=list)
     fault_counts: dict[str, int] = field(default_factory=dict)
-    ids: itertools.count = field(default_factory=lambda: itertools.count(1001))
+    ids: itertools.count[int] = field(default_factory=lambda: itertools.count(1001))
     idem: dict[str, Any] = field(default_factory=dict)
     messages: list[dict[str, Any]] = field(default_factory=list)
 
@@ -69,8 +69,9 @@ class _Shared:
 class SandboxSuite:
     """One object implementing CRM, Calendar and Messaging over shared state."""
 
-    def __init__(self, state: SandboxState | dict[str, Any] | None = None, *, name: str = "sandbox"
-                 ) -> None:
+    def __init__(
+        self, state: SandboxState | dict[str, Any] | None = None, *, name: str = "sandbox"
+    ) -> None:
         if isinstance(state, dict):
             state = SandboxState.model_validate(state)
         self.name = name
@@ -103,8 +104,9 @@ class SandboxSuite:
                     await asyncio.sleep(fault.delay_s)
                 if fault.error is not None:
                     self._s.log.append(OperationRecord(name, args, False, fault.error.value))
-                    raise IntegrationError(fault.error, f"sandbox fault: {name}",
-                                           integration=self.name)
+                    raise IntegrationError(
+                        fault.error, f"sandbox fault: {name}", integration=self.name
+                    )
         self._s.log.append(OperationRecord(name, args, True))
 
     def _id(self, prefix: str) -> str:
@@ -114,15 +116,24 @@ class SandboxSuite:
     async def find_contacts_by_phone(self, phone_e164: str) -> list[Contact]:
         await self._op("find_contacts_by_phone", {"phone": phone_e164})
         target = try_normalize_e164(phone_e164)
-        return [c for c in self._s.state.contacts if c.phone and
-                try_normalize_e164(c.phone) == target]
+        return [
+            c for c in self._s.state.contacts if c.phone and try_normalize_e164(c.phone) == target
+        ]
 
     async def search_contacts(self, query: str, limit: int = 5) -> list[Contact]:
         await self._op("search_contacts", {"query": query})
         q = query.lower().strip()
-        hits = [c for c in self._s.state.contacts if q and (
-            q in c.full_name.lower() or q in (c.email or "").lower() or q in (c.company or "").lower()
-            or q.replace(" ", "") in (c.phone or ""))]
+        hits = [
+            c
+            for c in self._s.state.contacts
+            if q
+            and (
+                q in c.full_name.lower()
+                or q in (c.email or "").lower()
+                or q in (c.company or "").lower()
+                or q.replace(" ", "") in (c.phone or "")
+            )
+        ]
         return hits[:limit]
 
     async def get_contact(self, contact_id: str) -> Contact | None:
@@ -133,21 +144,28 @@ class SandboxSuite:
         if idempotency_key in self._s.idem:
             return self._s.idem[idempotency_key]  # type: ignore[no-any-return]
         await self._op("create_contact", data.model_dump(mode="json", exclude_none=True))
-        contact = Contact(id=self._id("contact"), first_name=data.first_name,
-                          last_name=data.last_name, email=str(data.email) if data.email else None,
-                          phone=try_normalize_e164(data.phone) or data.phone,
-                          company=data.company, source="sandbox")
+        contact = Contact(
+            id=self._id("contact"),
+            first_name=data.first_name,
+            last_name=data.last_name,
+            email=str(data.email) if data.email else None,
+            phone=try_normalize_e164(data.phone) or data.phone,
+            company=data.company,
+            source="sandbox",
+        )
         self._s.state.contacts.append(contact)
         self._s.idem[idempotency_key] = contact
         return contact
 
     async def update_contact(self, contact_id: str, data: ContactUpdate) -> Contact:
-        await self._op("update_contact", {"id": contact_id, **data.model_dump(mode="json",
-                                                                             exclude_none=True)})
+        await self._op(
+            "update_contact", {"id": contact_id, **data.model_dump(mode="json", exclude_none=True)}
+        )
         for i, c in enumerate(self._s.state.contacts):
             if c.id == contact_id:
-                updated = c.model_copy(update={k: (str(v) if k == "email" else v)
-                                               for k, v in data.changes().items()})
+                updated = c.model_copy(
+                    update={k: (str(v) if k == "email" else v) for k, v in data.changes().items()}
+                )
                 self._s.state.contacts[i] = updated
                 return updated
         raise IntegrationError(ErrorKind.NOT_FOUND, "contact not found", integration=self.name)
@@ -156,8 +174,14 @@ class SandboxSuite:
         if idempotency_key in self._s.idem:
             return self._s.idem[idempotency_key]  # type: ignore[no-any-return]
         await self._op("create_lead", data.model_dump(mode="json", exclude_none=True))
-        lead = Lead(id=self._id("lead"), contact_id=data.contact_id, title=data.title,
-                    status="new", description=data.description, source="sandbox")
+        lead = Lead(
+            id=self._id("lead"),
+            contact_id=data.contact_id,
+            title=data.title,
+            status="new",
+            description=data.description,
+            source="sandbox",
+        )
         self._s.state.leads.append(lead)
         self._s.idem[idempotency_key] = lead
         return lead
@@ -179,33 +203,54 @@ class SandboxSuite:
     async def busy_intervals(self, start: datetime, end: datetime) -> list[TimeSlot]:
         await self._op("busy_intervals", {"start": start.isoformat(), "end": end.isoformat()})
         out = [b for b in self._s.state.busy if b.end > start and b.start < end]
-        out += [TimeSlot(start=a.start, end=a.end) for a in self._s.state.appointments
-                if a.status != "cancelled" and a.end > start and a.start < end]
+        out += [
+            TimeSlot(start=a.start, end=a.end)
+            for a in self._s.state.appointments
+            if a.status != "cancelled" and a.end > start and a.start < end
+        ]
         return sorted(out, key=lambda s: s.start)
 
     async def list_appointments(self, start: datetime, end: datetime) -> list[Appointment]:
         await self._op("list_appointments", {"start": start.isoformat(), "end": end.isoformat()})
-        return [a for a in self._s.state.appointments
-                if a.status != "cancelled" and a.end > start and a.start < end]
+        return [
+            a
+            for a in self._s.state.appointments
+            if a.status != "cancelled" and a.end > start and a.start < end
+        ]
 
     async def get_appointment(self, appointment_id: str) -> Appointment | None:
         await self._op("get_appointment", {"id": appointment_id})
-        return next((a for a in self._s.state.appointments
-                     if a.id == appointment_id and a.status != "cancelled"), None)
+        return next(
+            (
+                a
+                for a in self._s.state.appointments
+                if a.id == appointment_id and a.status != "cancelled"
+            ),
+            None,
+        )
 
-    async def create_appointment(self, data: AppointmentInput, *, idempotency_key: str
-                                 ) -> Appointment:
+    async def create_appointment(
+        self, data: AppointmentInput, *, idempotency_key: str
+    ) -> Appointment:
         if idempotency_key in self._s.idem:
             return self._s.idem[idempotency_key]  # type: ignore[no-any-return]
         await self._op("create_appointment", data.model_dump(mode="json", exclude_none=True))
         for b in await self.busy_intervals(data.start, data.end):
             if b.end > data.start and b.start < data.end:
-                raise IntegrationError(ErrorKind.CONFLICT, "slot already taken",
-                                       integration=self.name)
-        appt = Appointment(id=self._id("appt"), start=data.start, end=data.end, title=data.title,
-                           attendee_name=data.attendee_name, attendee_phone=data.attendee_phone,
-                           attendee_email=str(data.attendee_email) if data.attendee_email else None,
-                           notes=data.notes, source="sandbox")
+                raise IntegrationError(
+                    ErrorKind.CONFLICT, "slot already taken", integration=self.name
+                )
+        appt = Appointment(
+            id=self._id("appt"),
+            start=data.start,
+            end=data.end,
+            title=data.title,
+            attendee_name=data.attendee_name,
+            attendee_phone=data.attendee_phone,
+            attendee_email=str(data.attendee_email) if data.attendee_email else None,
+            notes=data.notes,
+            source="sandbox",
+        )
         self._s.state.appointments.append(appt)
         self._s.idem[idempotency_key] = appt
         return appt
@@ -219,8 +264,9 @@ class SandboxSuite:
         raise IntegrationError(ErrorKind.NOT_FOUND, "appointment not found", integration=self.name)
 
     # --- Messaging ---------------------------------------------------------------------------
-    async def send_sms(self, *, to: str, body: str, from_number: str, idempotency_key: str
-                       ) -> MessageResult:
+    async def send_sms(
+        self, *, to: str, body: str, from_number: str, idempotency_key: str
+    ) -> MessageResult:
         if idempotency_key in self._s.idem:
             return self._s.idem[idempotency_key]  # type: ignore[no-any-return]
         await self._op("send_sms", {"to": to, "body": body})

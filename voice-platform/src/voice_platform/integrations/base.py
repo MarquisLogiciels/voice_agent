@@ -18,13 +18,13 @@ from ..shared.http import EgressPolicy
 
 
 class ErrorKind(str, Enum):
-    AUTH = "auth"                    # credentials rejected — not retryable, alert tenant admin
-    PERMISSION = "permission"        # authenticated but forbidden
+    AUTH = "auth"  # credentials rejected — not retryable, alert tenant admin
+    PERMISSION = "permission"  # authenticated but forbidden
     NOT_FOUND = "not_found"
-    VALIDATION = "validation"        # vendor rejected the payload
-    CONFLICT = "conflict"            # duplicate / version conflict
+    VALIDATION = "validation"  # vendor rejected the payload
+    CONFLICT = "conflict"  # duplicate / version conflict
     RATE_LIMITED = "rate_limited"
-    UNAVAILABLE = "unavailable"      # 5xx / network / circuit open
+    UNAVAILABLE = "unavailable"  # 5xx / network / circuit open
     TIMEOUT = "timeout"
     CONFIGURATION = "configuration"  # integration misconfigured on our side
     UNKNOWN = "unknown"

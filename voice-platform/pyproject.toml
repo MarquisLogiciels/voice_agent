@@ -96,7 +96,10 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF"]
-ignore = ["S101", "RUF012", "B008", "S311"]
+# S101 asserts used for invariants; RUF001/2 intentional typography (→ — ≥) in text;
+# UP042 str-mixin enums kept for stable str() output; ASYNC109 explicit timeout params are
+# deliberate in this codebase; B008 FastAPI Depends defaults.
+ignore = ["S101", "RUF012", "B008", "S311", "RUF001", "RUF002", "UP042", "ASYNC109"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S108", "S603", "S607", "ASYNC"]

@@ -15,7 +15,12 @@ from dataclasses import dataclass
 
 import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError, OperationalError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from ..shared.errors import DependencyUnavailableError
 from ..shared.logging import get_logger

@@ -20,8 +20,15 @@ from .base import ErrorKind, IntegrationContext, IntegrationError
 from .http import IntegrationHttpClient
 
 _PARAM_NAME = r"^[a-z][a-z0-9_]{0,40}$"
-_FORBIDDEN_HEADERS = {"authorization", "cookie", "host", "content-length", "transfer-encoding",
-                      "x-api-key", "proxy-authorization"}
+_FORBIDDEN_HEADERS = {
+    "authorization",
+    "cookie",
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "x-api-key",
+    "proxy-authorization",
+}
 
 
 class ParamSpec(BaseModel):
@@ -169,8 +176,13 @@ def _truncate(value: Any, depth: int = 0) -> Any:
 
 
 class CustomRestIntegration:
-    def __init__(self, ctx: IntegrationContext, *, transport: httpx.AsyncBaseTransport | None = None,
-                 allow_insecure: bool = False) -> None:
+    def __init__(
+        self,
+        ctx: IntegrationContext,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        allow_insecure: bool = False,
+    ) -> None:
         self.name = ctx.name
         self.cfg = CustomRestConfig.model_validate(ctx.config)
         self.actions = {a.name: a for a in self.cfg.actions}
@@ -194,14 +206,20 @@ class CustomRestIntegration:
                 req.headers["Authorization"] = "Basic " + base64.b64encode(raw).decode()
 
         if auth_type != "none" and not creds:
-            raise IntegrationError(ErrorKind.CONFIGURATION,
-                                   f"custom integration '{ctx.name}' needs a credential")
+            raise IntegrationError(
+                ErrorKind.CONFIGURATION, f"custom integration '{ctx.name}' needs a credential"
+            )
         self.http = IntegrationHttpClient(
-            integration=f"custom:{ctx.name}", base_url=self.cfg.base_url.rstrip("/"),
-            egress=egress, auth=auth if auth_type != "none" else None,
-            timeout_s=min(self.cfg.timeout_s, ctx.timeout_s), transport=transport,
-            default_headers=self.cfg.default_headers, max_response_bytes=512 * 1024,
-            max_request_bytes=64 * 1024)
+            integration=f"custom:{ctx.name}",
+            base_url=self.cfg.base_url.rstrip("/"),
+            egress=egress,
+            auth=auth if auth_type != "none" else None,
+            timeout_s=min(self.cfg.timeout_s, ctx.timeout_s),
+            transport=transport,
+            default_headers=self.cfg.default_headers,
+            max_response_bytes=512 * 1024,
+            max_request_bytes=64 * 1024,
+        )
 
     async def aclose(self) -> None:
         await self.http.aclose()
@@ -213,8 +231,9 @@ class CustomRestIntegration:
         action = self.actions.get(action_name)
         if action is None:
             raise IntegrationError(ErrorKind.CONFIGURATION, f"unknown action '{action_name}'")
-        args = self.input_models[action_name].model_validate(arguments).model_dump(
-            exclude_none=True)
+        args = (
+            self.input_models[action_name].model_validate(arguments).model_dump(exclude_none=True)
+        )
         path = action.path
         query: dict[str, Any] = {}
         body: dict[str, Any] = {}
@@ -230,7 +249,9 @@ class CustomRestIntegration:
             else:
                 body[p.name] = value
         resp = await self.http.request(
-            action.method, path, params=query or None,
+            action.method,
+            path,
+            params=query or None,
             json_body=body if action.method in ("POST", "PUT", "PATCH") else None,
             operation=action.name,
         )
@@ -249,8 +270,9 @@ class CustomRestIntegration:
                 items = []
             items = items[: mapping.max_items]
             if mapping.fields:
-                items = [{k: _truncate(_extract(i, p)) for k, p in mapping.fields.items()}
-                         for i in items]
+                items = [
+                    {k: _truncate(_extract(i, p)) for k, p in mapping.fields.items()} for i in items
+                ]
             return {"items": _truncate(items), "count": len(items)}
         if mapping.fields:
             return {k: _truncate(_extract(data, p)) for k, p in mapping.fields.items()}

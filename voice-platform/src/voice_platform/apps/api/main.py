@@ -2,8 +2,8 @@
 
 import time
 import uuid
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -37,20 +37,30 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
         if getattr(app.state, "owns_services", True):
             await app.state.services.aclose()
 
-    app = FastAPI(title="Voice Platform API", version="0.1.0", lifespan=lifespan,
-                  docs_url="/docs", redoc_url=None)
+    app = FastAPI(
+        title="Voice Platform API",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url=None,
+    )
     if services is not None:
         app.state.services = services
         app.state.owns_services = False
 
     if settings.cors_origins:
-        app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
-                           allow_methods=["*"], allow_headers=["Authorization", "Content-Type"],
-                           allow_credentials=False)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type"],
+            allow_credentials=False,
+        )
 
     @app.middleware("http")
-    async def request_context(request: Request,
-                              call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    async def request_context(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
         declared = request.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > MAX_BODY:
@@ -63,8 +73,9 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
                 response = await call_next(request)
             except Exception:
                 logger.exception("unhandled error")
-                response = JSONResponse({"error": {"code": "internal_error",
-                                                   "request_id": request_id}}, status_code=500)
+                response = JSONResponse(
+                    {"error": {"code": "internal_error", "request_id": request_id}}, status_code=500
+                )
             matched = request.scope.get("route")
             if matched is not None:
                 route = getattr(matched, "path", route)
@@ -72,8 +83,9 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
             API_REQUESTS.labels(request.method, route, str(response.status_code)).inc()
             API_LATENCY.labels(request.method, route).observe(elapsed)
             if response.status_code >= 500:
-                logger.error("request failed", extra={"route": route,
-                                                      "status": response.status_code})
+                logger.error(
+                    "request failed", extra={"route": route, "status": response.status_code}
+                )
         response.headers["x-request-id"] = request_id
         response.headers["x-content-type-options"] = "nosniff"
         response.headers["referrer-policy"] = "no-referrer"
@@ -81,7 +93,8 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
         if request.url.path.startswith("/dashboard"):
             response.headers["content-security-policy"] = (
                 "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+            )
         return response
 
     @app.exception_handler(PlatformError)
@@ -89,15 +102,25 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
         headers = {}
         if isinstance(exc, RateLimitedError) and exc.retry_after_s:
             headers["Retry-After"] = str(int(exc.retry_after_s) + 1)
-        return JSONResponse({"error": {"code": exc.code, "message": exc.message,
-                                       "details": exc.details}},
-                            status_code=exc.http_status, headers=headers)
+        return JSONResponse(
+            {"error": {"code": exc.code, "message": exc.message, "details": exc.details}},
+            status_code=exc.http_status,
+            headers=headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
         errors = [{"loc": list(e["loc"]), "msg": e["msg"]} for e in exc.errors()[:20]]
-        return JSONResponse({"error": {"code": "validation_failed", "message": "invalid request",
-                                       "details": {"errors": errors}}}, status_code=422)
+        return JSONResponse(
+            {
+                "error": {
+                    "code": "validation_failed",
+                    "message": "invalid request",
+                    "details": {"errors": errors},
+                }
+            },
+            status_code=422,
+        )
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:
@@ -119,8 +142,13 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
     async def metrics() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-    for r in (routes_core.router, routes_agents.router, routes_ops.router, routes_ops.public,
-              routes_knowledge_eval.router):
+    for r in (
+        routes_core.router,
+        routes_agents.router,
+        routes_ops.router,
+        routes_ops.public,
+        routes_knowledge_eval.router,
+    ):
         app.include_router(r)
 
     if DASHBOARD_DIR.exists():
@@ -138,6 +166,19 @@ def run() -> None:
 
     settings = get_settings()
     configure_logging(level=settings.log_level, json_output=settings.log_json, service="vp-api")
-    uvicorn.run(create_app(settings=settings), host="0.0.0.0", port=8000,  # noqa: S104
-                proxy_headers=True, forwarded_allow_ips="*", log_config=None,
-                timeout_graceful_shutdown=20)
+    from ...observability.tracing_setup import configure_tracing
+
+    configure_tracing(
+        service="vp-api",
+        endpoint=settings.otel_exporter_otlp_endpoint,
+        environment=settings.environment.value,
+    )
+    uvicorn.run(
+        create_app(settings=settings),
+        host="0.0.0.0",  # noqa: S104 - containerized service listens on all interfaces
+        port=8000,
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+        log_config=None,
+        timeout_graceful_shutdown=20,
+    )

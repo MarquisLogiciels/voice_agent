@@ -34,12 +34,16 @@ async def login(body: LoginIn, request: Request, services: ServicesDep) -> dict[
     ip = request.client.host if request.client else "unknown"
     for key in (f"login:ip:{ip}", f"login:email:{body.email.lower()}"):
         decision = await services.rate_limiter.hit(
-            key, limit=services.settings.login_rate_limit_per_minute)
+            key, limit=services.settings.login_rate_limit_per_minute
+        )
         if not decision.allowed:
             raise RateLimitedError("too many login attempts", retry_after_s=decision.reset_in_s)
     token = await Authenticator(services.db, services.settings).login(body.email, body.password)
-    return {"access_token": token.access_token, "token_type": "bearer",
-            "expires_at": token.expires_at}
+    return {
+        "access_token": token.access_token,
+        "token_type": "bearer",
+        "expires_at": token.expires_at,
+    }
 
 
 @router.get("/me")
@@ -48,19 +52,30 @@ async def me(principal: PrincipalDep, services: ServicesDep) -> dict[str, Any]:
     if principal.is_platform_admin:
         async with services.db.session(DbScope.system()) as s:
             for t in (await s.scalars(sa.select(Tenant).order_by(Tenant.name))).all():
-                tenants.append({"id": str(t.id), "slug": t.slug, "name": t.name,
-                                "role": Role.OWNER.value})
+                tenants.append(
+                    {"id": str(t.id), "slug": t.slug, "name": t.name, "role": Role.OWNER.value}
+                )
     elif principal.kind == "user" and principal.user_id is not None:
         # narrow lookup function: only the caller's own memberships cross the RLS boundary
         async with services.db.session(DbScope(user_id=principal.user_id)) as s:
-            rows = (await s.execute(sa.text("select * from vp_user_memberships(:u)"),
-                                    {"u": principal.user_id})).all()
-        tenants = [{"id": str(r.tenant_id), "slug": r.slug, "name": r.name, "role": r.role}
-                   for r in sorted(rows, key=lambda r: r.name) if r.status == "active"]
+            rows = (
+                await s.execute(
+                    sa.text("select * from vp_user_memberships(:u)"), {"u": principal.user_id}
+                )
+            ).all()
+        tenants = [
+            {"id": str(r.tenant_id), "slug": r.slug, "name": r.name, "role": r.role}
+            for r in sorted(rows, key=lambda r: r.name)
+            if r.status == "active"
+        ]
     else:
         tenants = [{"id": str(t), "role": r.value} for t, r in principal.memberships.items()]
-    return {"kind": principal.kind, "id": principal.id,
-            "is_platform_admin": principal.is_platform_admin, "tenants": tenants}
+    return {
+        "kind": principal.kind,
+        "id": principal.id,
+        "is_platform_admin": principal.is_platform_admin,
+        "tenants": tenants,
+    }
 
 
 # --- tenants ----------------------------------------------------------------------------------
@@ -74,32 +89,51 @@ class TenantIn(BaseModel):
 
 
 def _tenant_out(t: Tenant) -> dict[str, Any]:
-    return {"id": str(t.id), "slug": t.slug, "name": t.name, "status": t.status,
-            "retention_days": t.retention_days, "data_region": t.data_region,
-            "settings": t.settings, "created_at": t.created_at.isoformat()}
+    return {
+        "id": str(t.id),
+        "slug": t.slug,
+        "name": t.name,
+        "status": t.status,
+        "retention_days": t.retention_days,
+        "data_region": t.data_region,
+        "settings": t.settings,
+        "created_at": t.created_at.isoformat(),
+    }
 
 
 @router.post("/tenants", status_code=201)
-async def create_tenant(body: TenantIn, principal: PrincipalDep, services: ServicesDep
-                        ) -> dict[str, Any]:
+async def create_tenant(
+    body: TenantIn, principal: PrincipalDep, services: ServicesDep
+) -> dict[str, Any]:
     principal.require_platform_admin()
     async with services.db.session(DbScope.system()) as s:
         if await s.scalar(sa.select(Tenant.id).where(Tenant.slug == body.slug)):
             raise ConflictError("tenant slug already exists")
-        t = Tenant(slug=body.slug, name=body.name, retention_days=body.retention_days,
-                   data_region=body.data_region)
+        t = Tenant(
+            slug=body.slug,
+            name=body.name,
+            retention_days=body.retention_days,
+            data_region=body.data_region,
+        )
         s.add(t)
         await s.flush()
         if body.owner_email and body.owner_password:
             user = await s.scalar(sa.select(User).where(User.email == body.owner_email.lower()))
             if user is None:
-                user = User(email=body.owner_email.lower(),
-                            password_hash=hash_password(body.owner_password))
+                user = User(
+                    email=body.owner_email.lower(), password_hash=hash_password(body.owner_password)
+                )
                 s.add(user)
                 await s.flush()
             s.add(Membership(tenant_id=t.id, user_id=user.id, role=Role.OWNER.value))
-        await record_audit(s, tenant_id=t.id, actor=principal, action="tenant.create",
-                           resource_type="tenant", resource_id=t.id)
+        await record_audit(
+            s,
+            tenant_id=t.id,
+            actor=principal,
+            action="tenant.create",
+            resource_type="tenant",
+            resource_id=t.id,
+        )
         return _tenant_out(t)
 
 
@@ -107,8 +141,10 @@ async def create_tenant(body: TenantIn, principal: PrincipalDep, services: Servi
 async def list_tenants(principal: PrincipalDep, services: ServicesDep) -> list[dict[str, Any]]:
     principal.require_platform_admin()
     async with services.db.session(DbScope.system()) as s:
-        return [_tenant_out(t) for t in (await s.scalars(sa.select(Tenant)
-                                                         .order_by(Tenant.created_at))).all()]
+        return [
+            _tenant_out(t)
+            for t in (await s.scalars(sa.select(Tenant).order_by(Tenant.created_at))).all()
+        ]
 
 
 @router.get("/tenants/{tenant_id}")
@@ -126,8 +162,9 @@ class TenantPatch(BaseModel):
 
 
 @router.patch("/tenants/{tenant_id}")
-async def update_tenant(body: TenantPatch, ctx: TenantCtx = Depends(tenant_ctx(P.TENANT_UPDATE))
-                        ) -> dict[str, Any]:
+async def update_tenant(
+    body: TenantPatch, ctx: TenantCtx = Depends(tenant_ctx(P.TENANT_UPDATE))
+) -> dict[str, Any]:
     # tenants table only allows writes in platform scope; the permission check is done above
     async with ctx.services.db.session(DbScope.system()) as s:
         t = await s.get(Tenant, ctx.tenant_id)
@@ -135,9 +172,15 @@ async def update_tenant(body: TenantPatch, ctx: TenantCtx = Depends(tenant_ctx(P
             raise NotFoundError("tenant not found")
         for field, value in body.model_dump(exclude_none=True).items():
             setattr(t, field, value)
-        await record_audit(s, tenant_id=t.id, actor=ctx.principal, action="tenant.update",
-                           resource_type="tenant", resource_id=t.id,
-                           details=body.model_dump(exclude_none=True))
+        await record_audit(
+            s,
+            tenant_id=t.id,
+            actor=ctx.principal,
+            action="tenant.update",
+            resource_type="tenant",
+            resource_id=t.id,
+            details=body.model_dump(exclude_none=True),
+        )
         return _tenant_out(t)
 
 
@@ -150,18 +193,24 @@ class MemberIn(BaseModel):
 
 
 @router.get("/tenants/{tenant_id}/members")
-async def list_members(ctx: TenantCtx = Depends(tenant_ctx(P.TENANT_READ))
-                       ) -> list[dict[str, Any]]:
-    rows = (await ctx.session.execute(
-        sa.select(Membership, User).join(User, User.id == Membership.user_id)
-        .where(Membership.tenant_id == ctx.tenant_id))).all()
-    return [{"user_id": str(u.id), "email": u.email, "full_name": u.full_name, "role": m.role}
-            for m, u in rows]
+async def list_members(ctx: TenantCtx = Depends(tenant_ctx(P.TENANT_READ))) -> list[dict[str, Any]]:
+    rows = (
+        await ctx.session.execute(
+            sa.select(Membership, User)
+            .join(User, User.id == Membership.user_id)
+            .where(Membership.tenant_id == ctx.tenant_id)
+        )
+    ).all()
+    return [
+        {"user_id": str(u.id), "email": u.email, "full_name": u.full_name, "role": m.role}
+        for m, u in rows
+    ]
 
 
 @router.post("/tenants/{tenant_id}/members", status_code=201)
-async def add_member(body: MemberIn, ctx: TenantCtx = Depends(tenant_ctx(P.MEMBERS_MANAGE))
-                     ) -> dict[str, Any]:
+async def add_member(
+    body: MemberIn, ctx: TenantCtx = Depends(tenant_ctx(P.MEMBERS_MANAGE))
+) -> dict[str, Any]:
     if body.role is Role.OWNER and ctx.role is not Role.OWNER:
         raise PermissionDeniedError("only owners can add owners")
     async with ctx.services.db.session(DbScope.system()) as s:
@@ -169,33 +218,55 @@ async def add_member(body: MemberIn, ctx: TenantCtx = Depends(tenant_ctx(P.MEMBE
         if user is None:
             if not body.password:
                 raise NotFoundError("user does not exist; provide an initial password")
-            user = User(email=body.email.lower(), password_hash=hash_password(body.password),
-                        full_name=body.full_name)
+            user = User(
+                email=body.email.lower(),
+                password_hash=hash_password(body.password),
+                full_name=body.full_name,
+            )
             s.add(user)
             await s.flush()
-        exists = await s.scalar(sa.select(Membership.id).where(
-            Membership.tenant_id == ctx.tenant_id, Membership.user_id == user.id))
+        exists = await s.scalar(
+            sa.select(Membership.id).where(
+                Membership.tenant_id == ctx.tenant_id, Membership.user_id == user.id
+            )
+        )
         if exists:
             raise ConflictError("already a member")
         s.add(Membership(tenant_id=ctx.tenant_id, user_id=user.id, role=body.role.value))
-        await record_audit(s, tenant_id=ctx.tenant_id, actor=ctx.principal, action="member.add",
-                           resource_type="user", resource_id=user.id,
-                           details={"role": body.role.value})
+        await record_audit(
+            s,
+            tenant_id=ctx.tenant_id,
+            actor=ctx.principal,
+            action="member.add",
+            resource_type="user",
+            resource_id=user.id,
+            details={"role": body.role.value},
+        )
         return {"user_id": str(user.id), "email": user.email, "role": body.role.value}
 
 
 @router.delete("/tenants/{tenant_id}/members/{user_id}", status_code=204)
-async def remove_member(user_id: uuid.UUID,
-                        ctx: TenantCtx = Depends(tenant_ctx(P.MEMBERS_MANAGE))) -> None:
-    m = await ctx.session.scalar(sa.select(Membership).where(
-        Membership.tenant_id == ctx.tenant_id, Membership.user_id == user_id))
+async def remove_member(
+    user_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.MEMBERS_MANAGE))
+) -> None:
+    m = await ctx.session.scalar(
+        sa.select(Membership).where(
+            Membership.tenant_id == ctx.tenant_id, Membership.user_id == user_id
+        )
+    )
     if m is None:
         raise NotFoundError("membership not found")
     if m.role == Role.OWNER.value and ctx.role is not Role.OWNER:
         raise PermissionDeniedError("only owners can remove owners")
     await ctx.session.delete(m)
-    await record_audit(ctx.session, tenant_id=ctx.tenant_id, actor=ctx.principal,
-                       action="member.remove", resource_type="user", resource_id=user_id)
+    await record_audit(
+        ctx.session,
+        tenant_id=ctx.tenant_id,
+        actor=ctx.principal,
+        action="member.remove",
+        resource_type="user",
+        resource_id=user_id,
+    )
 
 
 # --- API keys ---------------------------------------------------------------------------------
@@ -206,8 +277,9 @@ class ApiKeyIn(BaseModel):
 
 
 @router.post("/tenants/{tenant_id}/api-keys", status_code=201)
-async def create_api_key(body: ApiKeyIn, ctx: TenantCtx = Depends(tenant_ctx(P.API_KEYS_MANAGE))
-                         ) -> dict[str, Any]:
+async def create_api_key(
+    body: ApiKeyIn, ctx: TenantCtx = Depends(tenant_ctx(P.API_KEYS_MANAGE))
+) -> dict[str, Any]:
     if body.role is Role.OWNER:
         raise PermissionDeniedError("API keys cannot have the owner role")
     gen = generate_api_key()
@@ -216,63 +288,116 @@ async def create_api_key(body: ApiKeyIn, ctx: TenantCtx = Depends(tenant_ctx(P.A
         from datetime import timedelta
 
         expires = datetime.now(UTC) + timedelta(days=body.expires_in_days)
-    key = ApiKey(tenant_id=ctx.tenant_id, name=body.name, prefix=gen.prefix,
-                 key_hash=gen.digest, role=body.role.value, created_by=ctx.principal.user_id,
-                 expires_at=expires)
+    key = ApiKey(
+        tenant_id=ctx.tenant_id,
+        name=body.name,
+        prefix=gen.prefix,
+        key_hash=gen.digest,
+        role=body.role.value,
+        created_by=ctx.principal.user_id,
+        expires_at=expires,
+    )
     ctx.session.add(key)
     await ctx.session.flush()
-    await record_audit(ctx.session, tenant_id=ctx.tenant_id, actor=ctx.principal,
-                       action="api_key.create", resource_type="api_key", resource_id=key.id)
-    return {"id": str(key.id), "name": key.name, "role": key.role, "key": gen.plaintext,
-            "expires_at": expires.isoformat() if expires else None,
-            "note": "Store this key now; it cannot be shown again."}
+    await record_audit(
+        ctx.session,
+        tenant_id=ctx.tenant_id,
+        actor=ctx.principal,
+        action="api_key.create",
+        resource_type="api_key",
+        resource_id=key.id,
+    )
+    return {
+        "id": str(key.id),
+        "name": key.name,
+        "role": key.role,
+        "key": gen.plaintext,
+        "expires_at": expires.isoformat() if expires else None,
+        "note": "Store this key now; it cannot be shown again.",
+    }
 
 
 @router.get("/tenants/{tenant_id}/api-keys")
-async def list_api_keys(ctx: TenantCtx = Depends(tenant_ctx(P.API_KEYS_MANAGE))
-                        ) -> list[dict[str, Any]]:
-    keys = (await ctx.session.scalars(sa.select(ApiKey).where(
-        ApiKey.tenant_id == ctx.tenant_id).order_by(ApiKey.created_at))).all()
-    return [{"id": str(k.id), "name": k.name, "role": k.role, "prefix": k.prefix,
-             "revoked": k.revoked_at is not None,
-             "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
-             "expires_at": k.expires_at.isoformat() if k.expires_at else None} for k in keys]
+async def list_api_keys(
+    ctx: TenantCtx = Depends(tenant_ctx(P.API_KEYS_MANAGE)),
+) -> list[dict[str, Any]]:
+    keys = (
+        await ctx.session.scalars(
+            sa.select(ApiKey).where(ApiKey.tenant_id == ctx.tenant_id).order_by(ApiKey.created_at)
+        )
+    ).all()
+    return [
+        {
+            "id": str(k.id),
+            "name": k.name,
+            "role": k.role,
+            "prefix": k.prefix,
+            "revoked": k.revoked_at is not None,
+            "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+            "expires_at": k.expires_at.isoformat() if k.expires_at else None,
+        }
+        for k in keys
+    ]
 
 
 @router.delete("/tenants/{tenant_id}/api-keys/{key_id}", status_code=204)
-async def revoke_api_key(key_id: uuid.UUID,
-                         ctx: TenantCtx = Depends(tenant_ctx(P.API_KEYS_MANAGE))) -> None:
-    key = await ctx.session.scalar(sa.select(ApiKey).where(ApiKey.id == key_id,
-                                                           ApiKey.tenant_id == ctx.tenant_id))
+async def revoke_api_key(
+    key_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.API_KEYS_MANAGE))
+) -> None:
+    key = await ctx.session.scalar(
+        sa.select(ApiKey).where(ApiKey.id == key_id, ApiKey.tenant_id == ctx.tenant_id)
+    )
     if key is None:
         raise NotFoundError("API key not found")
     key.revoked_at = datetime.now(UTC)
-    await record_audit(ctx.session, tenant_id=ctx.tenant_id, actor=ctx.principal,
-                       action="api_key.revoke", resource_type="api_key", resource_id=key_id)
+    await record_audit(
+        ctx.session,
+        tenant_id=ctx.tenant_id,
+        actor=ctx.principal,
+        action="api_key.revoke",
+        resource_type="api_key",
+        resource_id=key_id,
+    )
 
 
 # --- audit ------------------------------------------------------------------------------------
 @router.get("/tenants/{tenant_id}/audit")
-async def audit_log(limit: int = 100, ctx: TenantCtx = Depends(tenant_ctx(P.AUDIT_READ))
-                    ) -> list[dict[str, Any]]:
-    rows = (await ctx.session.scalars(sa.select(AuditLog).where(
-        AuditLog.tenant_id == ctx.tenant_id).order_by(AuditLog.id.desc())
-        .limit(min(limit, 500)))).all()
-    return [{"id": r.id, "at": r.created_at.isoformat(), "actor": f"{r.actor_type}:{r.actor_id}",
-             "action": r.action, "resource": f"{r.resource_type}:{r.resource_id}",
-             "details": r.details} for r in rows]
+async def audit_log(
+    limit: int = 100, ctx: TenantCtx = Depends(tenant_ctx(P.AUDIT_READ))
+) -> list[dict[str, Any]]:
+    rows = (
+        await ctx.session.scalars(
+            sa.select(AuditLog)
+            .where(AuditLog.tenant_id == ctx.tenant_id)
+            .order_by(AuditLog.id.desc())
+            .limit(min(limit, 500))
+        )
+    ).all()
+    return [
+        {
+            "id": r.id,
+            "at": r.created_at.isoformat(),
+            "actor": f"{r.actor_type}:{r.actor_id}",
+            "action": r.action,
+            "resource": f"{r.resource_type}:{r.resource_id}",
+            "details": r.details,
+        }
+        for r in rows
+    ]
 
 
 # --- providers --------------------------------------------------------------------------------
 @router.get("/providers")
-async def provider_catalog(principal: PrincipalDep, services: ServicesDep,
-                           kind: ProviderKind | None = None) -> list[dict[str, Any]]:
-    return [d.metadata() for d in services.registry.list(kind)]
+async def provider_catalog(
+    principal: PrincipalDep, services: ServicesDep, kind: ProviderKind | None = None
+) -> list[dict[str, Any]]:
+    return [d.metadata() for d in services.registry.descriptors(kind)]
 
 
 @router.get("/providers/health")
-async def provider_health(principal: PrincipalDep, services: ServicesDep,
-                          probe: bool = False) -> dict[str, Any]:
+async def provider_health(
+    principal: PrincipalDep, services: ServicesDep, probe: bool = False
+) -> dict[str, Any]:
     """Circuit state seen by this process; ``probe=true`` (platform admins) runs no-cost
     authenticated probes with the platform-level keys."""
     out: dict[str, Any] = {"circuits": [h.__dict__ for h in global_tracker().snapshot()]}
@@ -281,7 +406,7 @@ async def provider_health(principal: PrincipalDep, services: ServicesDep,
         import os
 
         checks: dict[str, Any] = {}
-        for d in services.registry.list():
+        for d in services.registry.descriptors():
             if d.health_check is None:
                 continue
             key = next((os.environ[e] for e in d.secret_env if os.environ.get(e)), None)

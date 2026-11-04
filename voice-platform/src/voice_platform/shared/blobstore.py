@@ -75,7 +75,9 @@ class LocalBlobStore:
         return hmac.new(self._secret, f"{key}:{expires}".encode(), hashlib.sha256).hexdigest()
 
     def verify(self, key: str, expires: int, signature: str) -> bool:
-        return expires >= int(time.time()) and hmac.compare_digest(self.sign(key, expires), signature)
+        return expires >= int(time.time()) and hmac.compare_digest(
+            self.sign(key, expires), signature
+        )
 
     async def signed_url(self, key: str, ttl_s: int = 300) -> str:
         expires = int(time.time()) + ttl_s
@@ -102,7 +104,10 @@ class S3BlobStore:
     async def put(self, key: str, data: bytes, content_type: str) -> None:
         await asyncio.to_thread(
             self._client.put_object,
-            Bucket=self._bucket, Key=validate_key(key), Body=data, ContentType=content_type,
+            Bucket=self._bucket,
+            Key=validate_key(key),
+            Body=data,
+            ContentType=content_type,
             ServerSideEncryption="AES256",
         )
 

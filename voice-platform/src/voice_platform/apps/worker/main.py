@@ -30,8 +30,14 @@ def _get_services() -> Services:
 
 def prewarm(proc: JobProcess) -> None:
     settings = get_settings()
-    configure_logging(level=settings.log_level, json_output=settings.log_json,
-                      service="vp-worker")
+    configure_logging(level=settings.log_level, json_output=settings.log_json, service="vp-worker")
+    from ...observability.tracing_setup import configure_tracing
+
+    configure_tracing(
+        service="vp-worker",
+        endpoint=settings.otel_exporter_otlp_endpoint,
+        environment=settings.environment.value,
+    )
     try:
         from livekit.plugins import silero
 
@@ -43,8 +49,12 @@ def prewarm(proc: JobProcess) -> None:
 
 def build_server() -> AgentServer:
     settings = get_settings()
-    server = AgentServer(setup_fnc=prewarm, prometheus_port=settings.worker_metrics_port,
-                         job_memory_warn_mb=700, drain_timeout=1800)
+    server = AgentServer(
+        setup_fnc=prewarm,
+        prometheus_port=settings.worker_metrics_port,
+        job_memory_warn_mb=700,
+        drain_timeout=1800,
+    )
 
     @server.rtc_session(agent_name=settings.agent_dispatch_name)
     async def entrypoint(ctx: JobContext) -> None:

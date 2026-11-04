@@ -51,14 +51,21 @@ def test_redacts_patterns_and_registered_secrets() -> None:
         "key sk-ABCDEFGHIJKLMNOPQRSTUV and super-secret-value-123"
     )
     out = redact_text(text)
-    for leaked in ("abc.def.ghi", "XYZ12345", "t0k3n", "sk-ABCDEFGHIJKLMNOPQRSTUV",
-                   "super-secret-value-123"):
+    for leaked in (
+        "abc.def.ghi",
+        "XYZ12345",
+        "t0k3n",
+        "sk-ABCDEFGHIJKLMNOPQRSTUV",
+        "super-secret-value-123",
+    ):
         assert leaked not in out
 
 
 def test_redact_value_masks_sensitive_keys_recursively() -> None:
-    data = {"headers": {"Authorization": "Bearer x", "X-Other": "ok"},
-            "nested": [{"password": "p", "name": "n"}]}
+    data = {
+        "headers": {"Authorization": "Bearer x", "X-Other": "ok"},
+        "nested": [{"password": "p", "name": "n"}],
+    }
     out = redact_value(data)
     assert out["headers"]["Authorization"] == "[REDACTED]"
     assert out["headers"]["X-Other"] == "ok"
@@ -67,8 +74,9 @@ def test_redact_value_masks_sensitive_keys_recursively() -> None:
 
 
 def test_json_formatter_includes_context_and_redacts() -> None:
-    record = logging.LogRecord("t", logging.INFO, __file__, 1,
-                               "calling with token=%s", ("abcdef123456",), None)
+    record = logging.LogRecord(
+        "t", logging.INFO, __file__, 1, "calling with token=%s", ("abcdef123456",), None
+    )
     record.headers = {"authorization": "Bearer zzz"}
     RedactionFilter().filter(record)
     with log_context(tenant_id="t1", conversation_id="c1"):
@@ -136,8 +144,9 @@ async def test_retry_stops_on_non_retryable() -> None:
         raise ValueError("fatal")
 
     with pytest.raises(ValueError):
-        await retry_async(fn, policy=RetryPolicy(max_attempts=5, base_delay_s=0.001),
-                          is_retryable=lambda e: False)
+        await retry_async(
+            fn, policy=RetryPolicy(max_attempts=5, base_delay_s=0.001), is_retryable=lambda e: False
+        )
     assert calls == 1
 
 
@@ -150,8 +159,11 @@ async def test_retry_succeeds_after_transient() -> None:
             raise ConnectionError("transient")
         return "ok"
 
-    out = await retry_async(fn, policy=RetryPolicy(max_attempts=3, base_delay_s=0.001),
-                            is_retryable=lambda e: isinstance(e, ConnectionError))
+    out = await retry_async(
+        fn,
+        policy=RetryPolicy(max_attempts=3, base_delay_s=0.001),
+        is_retryable=lambda e: isinstance(e, ConnectionError),
+    )
     assert out == "ok" and attempts == [1, 2, 3]
 
 
@@ -183,8 +195,8 @@ def test_circuit_breaker_transitions() -> None:
         cb.check()
     now[0] = 11
     assert cb.state is CircuitState.HALF_OPEN
-    assert cb.allow()          # one trial
-    assert not cb.allow()      # second concurrent trial refused
+    assert cb.allow()  # one trial
+    assert not cb.allow()  # second concurrent trial refused
     cb.record_failure()
     assert cb.state is CircuitState.OPEN
     now[0] = 22
@@ -197,12 +209,12 @@ def test_circuit_breaker_transitions() -> None:
 @pytest.mark.parametrize(
     "url",
     [
-        "http://example.com/x",            # http not allowed
-        "https://127.0.0.1/x",            # loopback literal
+        "http://example.com/x",  # http not allowed
+        "https://127.0.0.1/x",  # loopback literal
         "https://169.254.169.254/latest",  # metadata
-        "https://10.0.0.5/",               # private
-        "https://user:pw@example.com/",    # userinfo
-        "https://example.com:8443/",       # port
+        "https://10.0.0.5/",  # private
+        "https://user:pw@example.com/",  # userinfo
+        "https://example.com:8443/",  # port
         "file:///etc/passwd",
         "https://[::1]/",
     ],

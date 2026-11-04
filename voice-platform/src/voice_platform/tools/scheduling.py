@@ -25,8 +25,11 @@ def opening_windows(hours: BusinessHours, day: date, tz: ZoneInfo) -> list[Windo
     for r in ranges:
         a, b = r.split("-")
         start = datetime.combine(day, time.fromisoformat(a), tz)
-        end = (datetime.combine(day + timedelta(days=1), time(0), tz) if b == "24:00"
-               else datetime.combine(day, time.fromisoformat(b), tz))
+        end = (
+            datetime.combine(day + timedelta(days=1), time(0), tz)
+            if b == "24:00"
+            else datetime.combine(day, time.fromisoformat(b), tz)
+        )
         out.append(Window(start, end))
     return out
 
@@ -66,9 +69,12 @@ def free_slots(
         while cursor + duration <= w.end:
             end = cursor + duration
             hour = cursor.hour
-            pref_ok = (preference == "any" or (preference == "morning" and hour < 12)
-                       or (preference == "afternoon" and 12 <= hour < 17)
-                       or (preference == "evening" and hour >= 17))
+            pref_ok = (
+                preference == "any"
+                or (preference == "morning" and hour < 12)
+                or (preference == "afternoon" and 12 <= hour < 17)
+                or (preference == "evening" and hour >= 17)
+            )
             if cursor >= earliest and pref_ok and not overlaps(cursor, end, busy):
                 out.append(TimeSlot(start=cursor, end=end))
                 if len(out) >= limit:
@@ -83,8 +89,21 @@ def speakable(dt: datetime, tz: ZoneInfo, language: str = "en") -> str:
     local = dt.astimezone(tz)
     if language.startswith("fr"):
         days = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
-        months = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
-                  "septembre", "octobre", "novembre", "décembre"]
+        months = [
+            "janvier",
+            "février",
+            "mars",
+            "avril",
+            "mai",
+            "juin",
+            "juillet",
+            "août",
+            "septembre",
+            "octobre",
+            "novembre",
+            "décembre",
+        ]
         minute = f"{local.minute:02d}" if local.minute else ""
-        return f"{days[local.weekday()]} {local.day} {months[local.month - 1]} à {local.hour} h {minute}".strip()
+        day = f"{days[local.weekday()]} {local.day} {months[local.month - 1]}"
+        return f"{day} à {local.hour} h {minute}".strip()
     return local.strftime("%A %B %-d at %-I:%M %p").replace(":00 ", " ")

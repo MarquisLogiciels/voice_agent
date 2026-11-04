@@ -28,8 +28,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         parts = Path(str(item.fspath)).parts
         for category in ("unit", "integration", "e2e", "load", "evaluations"):
             if category in parts:
-                item.add_marker(getattr(pytest.mark, "e2e" if category == "evaluations"
-                                        else category))
+                item.add_marker(
+                    getattr(pytest.mark, "e2e" if category == "evaluations" else category)
+                )
         if "load" in parts and not config.getoption("--run-load"):
             item.add_marker(pytest.mark.skip(reason="load tests need --run-load"))
         if item.get_closest_marker("live") and not config.getoption("--run-live"):
@@ -97,12 +98,15 @@ def sample_config(**overrides: Any) -> dict[str, Any]:
         "business": {
             "name": "Maple Dental",
             "timezone": "America/Toronto",
-            "hours": {"schedule": {d: ["09:00-17:00"] for d in ("mon", "tue", "wed", "thu", "fri")}},
+            "hours": {
+                "schedule": {d: ["09:00-17:00"] for d in ("mon", "tue", "wed", "thu", "fri")}
+            },
             "appointments": {
                 "default_duration_min": 30,
                 "min_notice_min": 0,
-                "hours": {"schedule": {d: ["09:00-17:00"] for d in
-                                       ("mon", "tue", "wed", "thu", "fri")}},
+                "hours": {
+                    "schedule": {d: ["09:00-17:00"] for d in ("mon", "tue", "wed", "thu", "fri")}
+                },
             },
         },
         "greeting": {"mode": "say", "text": "Hi, thanks for calling Maple Dental!"},

@@ -48,8 +48,7 @@ class Patch:
     rationale: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {"op": self.op, "path": self.path, "value": self.value,
-                "rationale": self.rationale}
+        return {"op": self.op, "path": self.path, "value": self.value, "rationale": self.rationale}
 
 
 class PatchRejected(Exception):
@@ -87,7 +86,7 @@ class PatchPolicy:
             raise PatchRejected(f"{patch.path} must be boolean")
         elif rule.kind == "choice":
             if patch.path == "pipeline.llm.model":
-                provider = (config.get("pipeline", {}).get("llm") or {}).get("provider")
+                provider = str((config.get("pipeline", {}).get("llm") or {}).get("provider"))
                 if v not in self.allowed_models.get(provider, ()):
                     raise PatchRejected(f"model '{v}' not in the approved list for {provider}")
             elif v not in rule.choices:
@@ -117,8 +116,9 @@ def _set(data: dict[str, Any], path: str, value: Any, *, append: bool) -> None:
         cur[leaf] = value
 
 
-def apply_patches(config: AgentConfig, patches: list[Patch], policy: PatchPolicy
-                  ) -> tuple[AgentConfig, list[Patch], list[tuple[Patch, str]]]:
+def apply_patches(
+    config: AgentConfig, patches: list[Patch], policy: PatchPolicy
+) -> tuple[AgentConfig, list[Patch], list[tuple[Patch, str]]]:
     """Apply valid patches; returns (new config, applied, rejected-with-reason)."""
     data = copy.deepcopy(config.model_dump(mode="json"))
     applied: list[Patch] = []

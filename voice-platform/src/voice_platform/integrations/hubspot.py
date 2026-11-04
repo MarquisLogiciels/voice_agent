@@ -53,22 +53,28 @@ def _check_id(value: str) -> str:
 
 
 class HubSpotCRM:
-    def __init__(self, ctx: IntegrationContext, *, transport: httpx.AsyncBaseTransport | None = None
-                 ) -> None:
+    def __init__(
+        self, ctx: IntegrationContext, *, transport: httpx.AsyncBaseTransport | None = None
+    ) -> None:
         self.name = ctx.name
         self.cfg = HubSpotConfig.model_validate(ctx.config)
         token = (ctx.credentials or {}).get("access_token")
         if not token:
-            raise IntegrationError(ErrorKind.CONFIGURATION, "HubSpot credential missing",
-                                   integration=ctx.name)
+            raise IntegrationError(
+                ErrorKind.CONFIGURATION, "HubSpot credential missing", integration=ctx.name
+            )
 
         async def auth(req: httpx.Request) -> None:
             req.headers["Authorization"] = f"Bearer {token}"
 
-        self.http = IntegrationHttpClient(integration=f"hubspot:{ctx.name}",
-                                          base_url="https://api.hubapi.com",
-                                          egress=HUBSPOT_EGRESS, auth=auth,
-                                          timeout_s=ctx.timeout_s, transport=transport)
+        self.http = IntegrationHttpClient(
+            integration=f"hubspot:{ctx.name}",
+            base_url="https://api.hubapi.com",
+            egress=HUBSPOT_EGRESS,
+            auth=auth,
+            timeout_s=ctx.timeout_s,
+            transport=transport,
+        )
 
     async def aclose(self) -> None:
         await self.http.aclose()
@@ -79,14 +85,24 @@ class HubSpotCRM:
         if self.cfg.portal_id:
             url = f"https://app.hubspot.com/contacts/{self.cfg.portal_id}/record/0-1/{obj['id']}"
         return Contact(
-            id=str(obj["id"]), first_name=p.get("firstname"), last_name=p.get("lastname"),
-            email=p.get("email"), phone=p.get("phone") or p.get("mobilephone"),
-            company=p.get("company"), source="hubspot", url=url,
+            id=str(obj["id"]),
+            first_name=p.get("firstname"),
+            last_name=p.get("lastname"),
+            email=p.get("email"),
+            phone=p.get("phone") or p.get("mobilephone"),
+            company=p.get("company"),
+            source="hubspot",
+            url=url,
         )
 
     async def _search(self, body: dict[str, Any]) -> list[Contact]:
-        data = await self.http.json("POST", "/crm/v3/objects/contacts/search", json_body=body,
-                                    retry_unsafe=True, operation="contacts.search")
+        data = await self.http.json(
+            "POST",
+            "/crm/v3/objects/contacts/search",
+            json_body=body,
+            retry_unsafe=True,
+            operation="contacts.search",
+        )
         return [self._contact(r) for r in (data or {}).get("results", [])]
 
     async def find_contacts_by_phone(self, phone_e164: str) -> list[Contact]:
@@ -94,21 +110,31 @@ class HubSpotCRM:
         groups = [
             {"filters": [{"propertyName": "phone", "operator": "EQ", "value": phone_e164}]},
             {"filters": [{"propertyName": "mobilephone", "operator": "EQ", "value": phone_e164}]},
-            {"filters": [{"propertyName": "hs_searchable_calculated_phone_number",
-                          "operator": "EQ", "value": digits}]},
+            {
+                "filters": [
+                    {
+                        "propertyName": "hs_searchable_calculated_phone_number",
+                        "operator": "EQ",
+                        "value": digits,
+                    }
+                ]
+            },
         ]
-        return await self._search({"filterGroups": groups, "properties": CONTACT_PROPS,
-                                   "limit": 5})
+        return await self._search({"filterGroups": groups, "properties": CONTACT_PROPS, "limit": 5})
 
     async def search_contacts(self, query: str, limit: int = 5) -> list[Contact]:
-        return await self._search({"query": query[:200], "properties": CONTACT_PROPS,
-                                   "limit": max(1, min(limit, 20))})
+        return await self._search(
+            {"query": query[:200], "properties": CONTACT_PROPS, "limit": max(1, min(limit, 20))}
+        )
 
     async def get_contact(self, contact_id: str) -> Contact | None:
         try:
             data = await self.http.json(
-                "GET", f"/crm/v3/objects/contacts/{_check_id(contact_id)}",
-                params={"properties": ",".join(CONTACT_PROPS)}, operation="contacts.get")
+                "GET",
+                f"/crm/v3/objects/contacts/{_check_id(contact_id)}",
+                params={"properties": ",".join(CONTACT_PROPS)},
+                operation="contacts.get",
+            )
         except IntegrationError as e:
             if e.kind is ErrorKind.NOT_FOUND:
                 return None
@@ -117,8 +143,13 @@ class HubSpotCRM:
 
     @staticmethod
     def _props(data: ContactInput | ContactUpdate) -> dict[str, Any]:
-        mapping = {"first_name": "firstname", "last_name": "lastname", "email": "email",
-                   "phone": "phone", "company": "company"}
+        mapping = {
+            "first_name": "firstname",
+            "last_name": "lastname",
+            "email": "email",
+            "phone": "phone",
+            "company": "company",
+        }
         raw = data.model_dump(exclude_none=True)
         props = {mapping[k]: v for k, v in raw.items() if k in mapping}
         if "phone" in props:
@@ -134,14 +165,31 @@ class HubSpotCRM:
                 if existing:
                     return existing[0]
         try:
-            created = await self.http.json("POST", "/crm/v3/objects/contacts",
-                                           json_body={"properties": self._props(data)},
-                                           operation="contacts.create")
+            created = await self.http.json(
+                "POST",
+                "/crm/v3/objects/contacts",
+                json_body={"properties": self._props(data)},
+                operation="contacts.create",
+            )
         except IntegrationError as e:
             if e.kind is ErrorKind.CONFLICT and data.email:
-                found = await self._search({"filterGroups": [{"filters": [
-                    {"propertyName": "email", "operator": "EQ", "value": str(data.email)}]}],
-                    "properties": CONTACT_PROPS, "limit": 1})
+                found = await self._search(
+                    {
+                        "filterGroups": [
+                            {
+                                "filters": [
+                                    {
+                                        "propertyName": "email",
+                                        "operator": "EQ",
+                                        "value": str(data.email),
+                                    }
+                                ]
+                            }
+                        ],
+                        "properties": CONTACT_PROPS,
+                        "limit": 1,
+                    }
+                )
                 if found:
                     return found[0]
             if e.ambiguous and data.phone and (e164 := try_normalize_e164(data.phone)):
@@ -158,31 +206,44 @@ class HubSpotCRM:
         props = self._props(data)
         if not props:
             raise IntegrationError(ErrorKind.VALIDATION, "no fields to update")
-        updated = await self.http.json("PATCH",
-                                       f"/crm/v3/objects/contacts/{_check_id(contact_id)}",
-                                       json_body={"properties": props}, retry_unsafe=True,
-                                       operation="contacts.update")
+        updated = await self.http.json(
+            "PATCH",
+            f"/crm/v3/objects/contacts/{_check_id(contact_id)}",
+            json_body={"properties": props},
+            retry_unsafe=True,
+            operation="contacts.update",
+        )
         return self._contact(updated)
 
     async def create_lead(self, data: LeadInput, *, idempotency_key: str) -> Lead:
         contact_id = data.contact_id
         if contact_id is None and (data.phone or data.email or data.last_name):
             contact = await self.create_contact(
-                ContactInput(first_name=data.first_name, last_name=data.last_name,
-                             email=data.email, phone=data.phone, company=data.company),
-                idempotency_key=idempotency_key + ":contact")
+                ContactInput(
+                    first_name=data.first_name,
+                    last_name=data.last_name,
+                    email=data.email,
+                    phone=data.phone,
+                    company=data.company,
+                ),
+                idempotency_key=idempotency_key + ":contact",
+            )
             contact_id = contact.id
         if self.cfg.lead_object == "deals":
             path = "/crm/v3/objects/deals"
-            props: dict[str, Any] = {"dealname": data.title, "pipeline": self.cfg.deal_pipeline,
-                                     "dealstage": self.cfg.deal_stage}
+            props: dict[str, Any] = {
+                "dealname": data.title,
+                "pipeline": self.cfg.deal_pipeline,
+                "dealstage": self.cfg.deal_stage,
+            }
             if data.description:
                 props["description"] = data.description
             assoc_type = self.cfg.deal_to_contact_type
         else:
             if contact_id is None:
-                raise IntegrationError(ErrorKind.VALIDATION,
-                                       "HubSpot leads must be associated with a contact")
+                raise IntegrationError(
+                    ErrorKind.VALIDATION, "HubSpot leads must be associated with a contact"
+                )
             path = "/crm/v3/objects/leads"
             props = {"hs_lead_name": data.title}
             if self.cfg.lead_pipeline_stage:
@@ -190,17 +251,24 @@ class HubSpotCRM:
             assoc_type = self.cfg.lead_to_contact_type
         body: dict[str, Any] = {"properties": props}
         if contact_id:
-            body["associations"] = [{
-                "to": {"id": _check_id(contact_id)},
-                "types": [{"associationCategory": "HUBSPOT_DEFINED",
-                           "associationTypeId": assoc_type}],
-            }]
+            body["associations"] = [
+                {
+                    "to": {"id": _check_id(contact_id)},
+                    "types": [
+                        {"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": assoc_type}
+                    ],
+                }
+            ]
         created = await self.http.json("POST", path, json_body=body, operation="leads.create")
         p = created.get("properties") or {}
-        return Lead(id=str(created["id"]), contact_id=contact_id,
-                    title=p.get("dealname") or p.get("hs_lead_name") or data.title,
-                    status=p.get("dealstage") or p.get("hs_pipeline_stage"),
-                    description=p.get("description"), source="hubspot")
+        return Lead(
+            id=str(created["id"]),
+            contact_id=contact_id,
+            title=p.get("dealname") or p.get("hs_lead_name") or data.title,
+            status=p.get("dealstage") or p.get("hs_pipeline_stage"),
+            description=p.get("description"),
+            source="hubspot",
+        )
 
     async def update_lead(self, lead_id: str, data: LeadUpdate) -> Lead:
         changes = data.changes()
@@ -213,23 +281,41 @@ class HubSpotCRM:
         props = {mapping[k]: v for k, v in changes.items() if k in mapping}
         if not props:
             raise IntegrationError(ErrorKind.VALIDATION, "no supported fields to update")
-        updated = await self.http.json("PATCH", path, json_body={"properties": props},
-                                       retry_unsafe=True, operation="leads.update")
+        updated = await self.http.json(
+            "PATCH",
+            path,
+            json_body={"properties": props},
+            retry_unsafe=True,
+            operation="leads.update",
+        )
         p = updated.get("properties") or {}
-        return Lead(id=str(updated["id"]), title=p.get("dealname") or p.get("hs_lead_name") or "",
-                    status=p.get("dealstage") or p.get("hs_pipeline_stage"),
-                    description=p.get("description"), source="hubspot")
+        return Lead(
+            id=str(updated["id"]),
+            title=p.get("dealname") or p.get("hs_lead_name") or "",
+            status=p.get("dealstage") or p.get("hs_pipeline_stage"),
+            description=p.get("description"),
+            source="hubspot",
+        )
 
     async def add_note(self, contact_id: str, text: str, *, idempotency_key: str) -> str:
         body = {
-            "properties": {"hs_note_body": text[:65_000],
-                           "hs_timestamp": datetime.now(UTC).isoformat()},
-            "associations": [{
-                "to": {"id": _check_id(contact_id)},
-                "types": [{"associationCategory": "HUBSPOT_DEFINED",
-                           "associationTypeId": self.cfg.note_to_contact_type}],
-            }],
+            "properties": {
+                "hs_note_body": text[:65_000],
+                "hs_timestamp": datetime.now(UTC).isoformat(),
+            },
+            "associations": [
+                {
+                    "to": {"id": _check_id(contact_id)},
+                    "types": [
+                        {
+                            "associationCategory": "HUBSPOT_DEFINED",
+                            "associationTypeId": self.cfg.note_to_contact_type,
+                        }
+                    ],
+                }
+            ],
         }
-        created = await self.http.json("POST", "/crm/v3/objects/notes", json_body=body,
-                                       operation="notes.create")
+        created = await self.http.json(
+            "POST", "/crm/v3/objects/notes", json_body=body, operation="notes.create"
+        )
         return str(created["id"])

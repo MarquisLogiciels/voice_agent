@@ -100,5 +100,6 @@ async def dispatch_outbound(lkapi: Any, *, agent_name: str, meta: DispatchMetada
 
     room = f"out-{meta.conversation_id}"
     await lkapi.agent_dispatch.create_dispatch(
-        api.CreateAgentDispatchRequest(agent_name=agent_name, room=room, metadata=meta.to_json()))
+        api.CreateAgentDispatchRequest(agent_name=agent_name, room=room, metadata=meta.to_json())
+    )
     return room

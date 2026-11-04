@@ -67,10 +67,15 @@ class ContextCompactor:
             return None
         # keep the tail from starting with orphaned tool items
         while split < len(items) and getattr(items[split], "type", None) in (
-                "function_call", "function_call_output"):
+            "function_call",
+            "function_call_output",
+        ):
             split += 1
-        older = [it for it in items[:split] if not (
-            getattr(it, "type", None) == "message" and it.role in ("system", "developer"))]
+        older = [
+            it
+            for it in items[:split]
+            if not (getattr(it, "type", None) == "message" and it.role in ("system", "developer"))
+        ]
         if not older:
             return None
         transcript = "\n".join(t for t in (_item_text(i) for i in older) if t)
@@ -93,9 +98,12 @@ class ContextCompactor:
         for it in current.items:
             if it.id in plan.drop_ids:
                 if not inserted and summary:
-                    new_ctx.items.append(ChatMessage(
-                        role="assistant",
-                        content=[f"[Summary of the earlier conversation] {summary}"]))
+                    new_ctx.items.append(
+                        ChatMessage(
+                            role="assistant",
+                            content=[f"[Summary of the earlier conversation] {summary}"],
+                        )
+                    )
                     inserted = True
                 continue
             new_ctx.items.append(it)

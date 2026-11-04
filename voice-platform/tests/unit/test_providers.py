@@ -11,21 +11,40 @@ from voice_platform.providers.health import ProviderHealthTracker
 from voice_platform.providers.registry import ProviderError, ProviderRegistry, default_registry
 from voice_platform.providers.types import BuildContext, ProviderDescriptor, ProviderKind
 
-KEYS = {k: "k" * 32 for k in ("DEEPGRAM_API_KEY", "ASSEMBLYAI_API_KEY", "OPENAI_API_KEY",
-                              "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "CARTESIA_API_KEY",
-                              "ELEVEN_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET")}
+KEYS = {
+    k: "k" * 32
+    for k in (
+        "DEEPGRAM_API_KEY",
+        "ASSEMBLYAI_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "CARTESIA_API_KEY",
+        "ELEVEN_API_KEY",
+        "LIVEKIT_API_KEY",
+        "LIVEKIT_API_SECRET",
+    )
+}
 
 
 def _ctx(**env: str) -> BuildContext:
     return BuildContext(env={**KEYS, **env})
 
 
-def _pipeline(stt: dict[str, Any], llm: dict[str, Any], tts: dict[str, Any],
-              **extra: Any) -> PipelineConfig:
-    return PipelineConfig.model_validate({
-        "mode": "cascaded", "stt": stt, "llm": llm, "tts": tts,
-        "vad": {"provider": "livekit"}, "turn_detection": {"mode": "vad"}, **extra,
-    })
+def _pipeline(
+    stt: dict[str, Any], llm: dict[str, Any], tts: dict[str, Any], **extra: Any
+) -> PipelineConfig:
+    return PipelineConfig.model_validate(
+        {
+            "mode": "cascaded",
+            "stt": stt,
+            "llm": llm,
+            "tts": tts,
+            "vad": {"provider": "livekit"},
+            "turn_detection": {"mode": "vad"},
+            **extra,
+        }
+    )
 
 
 def _cls(obj: Any) -> str:
@@ -34,20 +53,32 @@ def _cls(obj: Any) -> str:
 
 def test_swapping_providers_requires_only_config() -> None:
     builder = PipelineBuilder(default_registry(), tracker=ProviderHealthTracker())
-    a = builder.build(_pipeline(
-        {"provider": "deepgram", "model": "nova-3", "language": "fr-CA"},
-        {"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
-        {"provider": "elevenlabs", "model": "eleven_turbo_v2_5", "voice": "custom_voice_id"},
-    ), _ctx())
-    b = builder.build(_pipeline(
-        {"provider": "assemblyai", "language": "en"},
-        {"provider": "anthropic", "model": "claude-haiku-4-5"},
-        {"provider": "cartesia", "model": "sonic-2", "voice": "abc"},
-    ), _ctx())
+    a = builder.build(
+        _pipeline(
+            {"provider": "deepgram", "model": "nova-3", "language": "fr-CA"},
+            {"provider": "openai", "model": "gpt-4.1", "temperature": 0.3},
+            {"provider": "elevenlabs", "model": "eleven_turbo_v2_5", "voice": "custom_voice_id"},
+        ),
+        _ctx(),
+    )
+    b = builder.build(
+        _pipeline(
+            {"provider": "assemblyai", "language": "en"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5"},
+            {"provider": "cartesia", "model": "sonic-2", "voice": "abc"},
+        ),
+        _ctx(),
+    )
     assert (_cls(a.stt), _cls(a.llm), _cls(a.tts)) == (
-        "deepgram.STT", "openai.LLM", "elevenlabs.TTS")
+        "deepgram.STT",
+        "openai.LLM",
+        "elevenlabs.TTS",
+    )
     assert (_cls(b.stt), _cls(b.llm), _cls(b.tts)) == (
-        "assemblyai.STT", "anthropic.LLM", "cartesia.TTS")
+        "assemblyai.STT",
+        "anthropic.LLM",
+        "cartesia.TTS",
+    )
     assert a.stt._opts.language == "fr-CA"  # type: ignore[union-attr]
     assert a.providers["llm"] == ["llm:openai:gpt-4.1"]
 
@@ -56,11 +87,17 @@ def test_fallback_chain_builds_livekit_adapters_in_order() -> None:
     from livekit.agents import llm, stt, tts
 
     builder = PipelineBuilder(default_registry(), tracker=ProviderHealthTracker())
-    built = builder.build(_pipeline(
-        {"provider": "deepgram", "fallbacks": [{"provider": "assemblyai"}]},
-        {"provider": "openai", "fallbacks": [{"provider": "anthropic"}, {"provider": "google"}]},
-        {"provider": "cartesia", "voice": "v", "fallbacks": [{"provider": "openai"}]},
-    ), _ctx())
+    built = builder.build(
+        _pipeline(
+            {"provider": "deepgram", "fallbacks": [{"provider": "assemblyai"}]},
+            {
+                "provider": "openai",
+                "fallbacks": [{"provider": "anthropic"}, {"provider": "google"}],
+            },
+            {"provider": "cartesia", "voice": "v", "fallbacks": [{"provider": "openai"}]},
+        ),
+        _ctx(),
+    )
     assert isinstance(built.stt, stt.FallbackAdapter)
     assert isinstance(built.llm, llm.FallbackAdapter)
     assert isinstance(built.tts, tts.FallbackAdapter)
@@ -130,26 +167,37 @@ def test_option_validation_rejects_unknown_and_out_of_range() -> None:
 
 def test_capability_checks() -> None:
     builder = PipelineBuilder(default_registry())
-    no_vad = PipelineConfig.model_validate({
-        "mode": "cascaded", "stt": {"provider": "openai"}, "llm": {"provider": "openai"},
-        "tts": {"provider": "openai"}, "vad": None, "turn_detection": {"mode": "stt"},
-    })
+    no_vad = PipelineConfig.model_validate(
+        {
+            "mode": "cascaded",
+            "stt": {"provider": "openai"},
+            "llm": {"provider": "openai"},
+            "tts": {"provider": "openai"},
+            "vad": None,
+            "turn_detection": {"mode": "stt"},
+        }
+    )
     msgs = " ".join(p.message for p in builder.validate(no_vad, _ctx()))
     assert "needs a VAD" in msgs
     assert "does not emit end-of-speech" in msgs
-    model_td = _pipeline({"provider": "deepgram"}, {"provider": "openai"},
-                         {"provider": "openai"},
-                         turn_detection={"mode": "model", "provider": "nope"})
-    assert any("unknown turn_detection provider" in p.message
-               for p in builder.validate(model_td, _ctx()))
+    model_td = _pipeline(
+        {"provider": "deepgram"},
+        {"provider": "openai"},
+        {"provider": "openai"},
+        turn_detection={"mode": "model", "provider": "nope"},
+    )
+    assert any(
+        "unknown turn_detection provider" in p.message for p in builder.validate(model_td, _ctx())
+    )
 
 
 def test_non_streaming_stt_is_wrapped_with_stream_adapter() -> None:
     from livekit.agents import stt
 
     builder = PipelineBuilder(default_registry(), tracker=ProviderHealthTracker())
-    built = builder.build(_pipeline({"provider": "openai"}, {"provider": "openai"},
-                                    {"provider": "openai"}), _ctx())
+    built = builder.build(
+        _pipeline({"provider": "openai"}, {"provider": "openai"}, {"provider": "openai"}), _ctx()
+    )
     assert isinstance(built.stt, stt.StreamAdapter)
 
 
@@ -157,12 +205,18 @@ def test_realtime_mode() -> None:
     from livekit.agents import llm
 
     builder = PipelineBuilder(default_registry(), tracker=ProviderHealthTracker())
-    cfg = PipelineConfig.model_validate({
-        "mode": "realtime",
-        "realtime": {"provider": "openai-realtime", "voice": "marin",
-                     "fallbacks": [{"provider": "google-realtime"}]},
-        "vad": None, "turn_detection": {"mode": "realtime_llm"},
-    })
+    cfg = PipelineConfig.model_validate(
+        {
+            "mode": "realtime",
+            "realtime": {
+                "provider": "openai-realtime",
+                "voice": "marin",
+                "fallbacks": [{"provider": "google-realtime"}],
+            },
+            "vad": None,
+            "turn_detection": {"mode": "realtime_llm"},
+        }
+    )
     built = builder.build(cfg, _ctx())
     assert isinstance(built.llm, llm.RealtimeModelFallbackAdapter)
     assert built.stt is None and built.turn_detection == "realtime_llm"
@@ -170,8 +224,13 @@ def test_realtime_mode() -> None:
 
 def test_registry_rejects_duplicates_and_reports_metadata() -> None:
     reg = ProviderRegistry()
-    desc = ProviderDescriptor(kind=ProviderKind.LLM, name="x", display_name="X",
-                              factory=lambda r, c: object(), package="pkg")
+    desc = ProviderDescriptor(
+        kind=ProviderKind.LLM,
+        name="x",
+        display_name="X",
+        factory=lambda r, c: object(),
+        package="pkg",
+    )
     reg.register(desc)
     with pytest.raises(ProviderError):
         reg.register(desc)
@@ -182,7 +241,7 @@ def test_registry_rejects_duplicates_and_reports_metadata() -> None:
 
 
 def test_every_builtin_provider_has_pricing_or_is_keyless() -> None:
-    for d in default_registry().list():
+    for d in default_registry().descriptors():
         if d.kind in (ProviderKind.STT, ProviderKind.LLM, ProviderKind.TTS):
             assert d.price_for(None) is not None or d.name == "openai-compatible", d.name
 
@@ -198,8 +257,9 @@ async def test_livekit_llm_fallback_switches_and_tracker_records() -> None:
 
     class OkStream(llm.LLMStream):
         async def _run(self) -> None:
-            self._event_ch.send_nowait(ChatChunk(
-                id="1", delta=ChoiceDelta(role="assistant", content="hello from backup")))
+            self._event_ch.send_nowait(
+                ChatChunk(id="1", delta=ChoiceDelta(role="assistant", content="hello from backup"))
+            )
 
     class FakeLLM(llm.LLM):
         def __init__(self, ok: bool) -> None:
@@ -210,19 +270,38 @@ async def test_livekit_llm_fallback_switches_and_tracker_records() -> None:
         def model(self) -> str:
             return "fake-ok" if self._ok else "fake-bad"
 
-        def chat(self, *, chat_ctx: ChatContext, tools: Any = None, conn_options: Any = None,
-                 **_: Any) -> llm.LLMStream:
+        def chat(
+            self, *, chat_ctx: ChatContext, tools: Any = None, conn_options: Any = None, **_: Any
+        ) -> llm.LLMStream:
             from livekit.agents import DEFAULT_API_CONNECT_OPTIONS
 
             cls = OkStream if self._ok else FailingStream
-            return cls(self, chat_ctx=chat_ctx, tools=tools or [],
-                       conn_options=conn_options or DEFAULT_API_CONNECT_OPTIONS)
+            return cls(
+                self,
+                chat_ctx=chat_ctx,
+                tools=tools or [],
+                conn_options=conn_options or DEFAULT_API_CONNECT_OPTIONS,
+            )
 
     reg = ProviderRegistry()
-    reg.register(ProviderDescriptor(kind=ProviderKind.LLM, name="bad", display_name="bad",
-                                    factory=lambda r, c: FakeLLM(False), package="t"))
-    reg.register(ProviderDescriptor(kind=ProviderKind.LLM, name="good", display_name="good",
-                                    factory=lambda r, c: FakeLLM(True), package="t"))
+    reg.register(
+        ProviderDescriptor(
+            kind=ProviderKind.LLM,
+            name="bad",
+            display_name="bad",
+            factory=lambda r, c: FakeLLM(False),
+            package="t",
+        )
+    )
+    reg.register(
+        ProviderDescriptor(
+            kind=ProviderKind.LLM,
+            name="good",
+            display_name="good",
+            factory=lambda r, c: FakeLLM(True),
+            package="t",
+        )
+    )
     from voice_platform.config.schema import ProviderSpec
 
     tracker = ProviderHealthTracker(failure_threshold=1)

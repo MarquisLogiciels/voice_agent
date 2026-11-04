@@ -39,8 +39,11 @@ def server(pg_urls: dict[str, str], tmp_path: Path) -> Any:
 
     port = _free_port()
     email = f"owner-{uuid.uuid4().hex[:8]}@example.com"
-    settings = Settings(environment="test", blob_local_path=str(tmp_path / "b"),
-                        public_base_url=f"http://127.0.0.1:{port}")
+    settings = Settings(
+        environment="test",
+        blob_local_path=str(tmp_path / "b"),
+        public_base_url=f"http://127.0.0.1:{port}",
+    )
     holder: dict[str, Any] = {}
 
     def run() -> None:
@@ -58,8 +61,9 @@ def server(pg_urls: dict[str, str], tmp_path: Path) -> Any:
 
         loop.run_until_complete(seed())
         app = create_app(services=Services.from_settings(settings, db=db))
-        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
-                                loop="asyncio")
+        config = uvicorn.Config(
+            app, host="127.0.0.1", port=port, log_level="warning", loop="asyncio"
+        )
         srv = uvicorn.Server(config)
         holder["server"] = srv
         loop.run_until_complete(srv.serve())
@@ -84,8 +88,14 @@ def test_dashboard_login_create_agent_deploy(server: dict[str, Any]) -> None:
     if shutil.which("node") is None:
         pytest.skip("node is required for the browser smoke test")
     script = Path(__file__).with_name("dashboard_smoke.cjs")
-    env = {**os.environ, "VP_URL": server["url"], "VP_EMAIL": server["email"],
-           "VP_PASSWORD": PASSWORD, "VP_CONFIG": json.dumps(sample_config())}
-    proc = subprocess.run(["node", str(script)], env=env, capture_output=True, text=True,
-                          timeout=120)
+    env = {
+        **os.environ,
+        "VP_URL": server["url"],
+        "VP_EMAIL": server["email"],
+        "VP_PASSWORD": PASSWORD,
+        "VP_CONFIG": json.dumps(sample_config()),
+    }
+    proc = subprocess.run(
+        ["node", str(script)], env=env, capture_output=True, text=True, timeout=120
+    )
     assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -18,7 +18,9 @@ def _cfg(**kw: Any) -> AgentConfig:
 def test_sample_config_is_valid() -> None:
     cfg = _cfg()
     assert cfg.pipeline.stt and cfg.pipeline.stt.provider == "deepgram"
-    assert cfg.conversation.context.max_items >= cfg.conversation.context.summarize_when_items_exceed
+    assert (
+        cfg.conversation.context.max_items >= cfg.conversation.context.summarize_when_items_exceed
+    )
 
 
 def test_cascaded_requires_components() -> None:
@@ -36,7 +38,7 @@ def test_realtime_mode_rejects_cascaded_components() -> None:
         "llm": {"provider": "openai"},
         "turn_detection": {"mode": "realtime_llm"},
     }
-    with pytest.raises(ValidationError, match="must not define stt/llm"):
+    with pytest.raises(ValidationError, match=r"must not define stt/llm"):
         AgentConfig.model_validate(data)
     del data["pipeline"]["llm"]
     cfg = AgentConfig.model_validate(data)
@@ -44,7 +46,7 @@ def test_realtime_mode_rejects_cascaded_components() -> None:
 
 
 def test_tools_require_bindings() -> None:
-    with pytest.raises(ValidationError, match="integrations.crm"):
+    with pytest.raises(ValidationError, match=r"integrations\.crm"):
         _cfg(tools={"enabled": ["lookup_customer"]})
     cfg = _cfg(tools={"enabled": ["lookup_customer"]}, integrations={"crm": "hubspot"})
     assert "lookup_customer" in cfg.tools.enabled
@@ -60,10 +62,13 @@ def test_custom_tool_must_reference_bound_integration() -> None:
 
 
 def test_transfer_validation() -> None:
-    base = {"enabled": True, "destinations": [
-        {"name": "front", "phone_number": "+15145550100", "fallback": ["billing"]},
-        {"name": "billing", "phone_number": "+15145550101", "fallback": ["front"]},
-    ]}
+    base = {
+        "enabled": True,
+        "destinations": [
+            {"name": "front", "phone_number": "+15145550100", "fallback": ["billing"]},
+            {"name": "billing", "phone_number": "+15145550101", "fallback": ["front"]},
+        ],
+    }
     with pytest.raises(ValidationError, match="cycle"):
         _cfg(transfer=base)
     base["destinations"][1]["fallback"] = []
@@ -71,7 +76,7 @@ def test_transfer_validation() -> None:
     assert cfg.transfer.destinations[0].fallback == ["billing"]
     with pytest.raises(ValidationError, match="exactly one"):
         _cfg(transfer={"enabled": True, "destinations": [{"name": "x"}]})
-    with pytest.raises(ValidationError, match="transfer.enabled"):
+    with pytest.raises(ValidationError, match=r"transfer\.enabled"):
         _cfg(tools={"enabled": ["transfer_to_human"]})
 
 
@@ -87,7 +92,7 @@ def test_environment_override_materializes_and_is_validated() -> None:
     staging = cfg.materialize("staging")
     assert staging.pipeline.llm and staging.pipeline.llm.model == "gpt-4.1-nano"
     assert cfg.materialize("prod").pipeline.llm.model == "gpt-4.1-mini"  # type: ignore[union-attr]
-    with pytest.raises(ValidationError, match="override 'staging' is invalid"):
+    with pytest.raises(ValidationError, match=r"override 'staging' is invalid"):
         _cfg(environment_overrides={"staging": {"pipeline": {"tts": None}}})
 
 

@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION: Literal[1] = 1
 
 _NAME = r"^[a-z][a-z0-9_\-]{0,62}$"
 
@@ -61,9 +61,9 @@ class ProviderSpec(ProviderRef):
 
 
 class TurnDetectionMode(str, Enum):
-    MODEL = "model"            # LiveKit turn-detector model (EnglishModel / MultilingualModel)
-    VAD = "vad"                # VAD silence endpointing
-    STT = "stt"                # STT provider end-of-speech
+    MODEL = "model"  # LiveKit turn-detector model (EnglishModel / MultilingualModel)
+    VAD = "vad"  # VAD silence endpointing
+    STT = "stt"  # STT provider end-of-speech
     REALTIME = "realtime_llm"  # server-side detection inside a realtime model
     MANUAL = "manual"
 
@@ -134,7 +134,8 @@ class EndpointingConfig(_Model):
 class InterruptionConfig(_Model):
     enabled: bool = True
     mode: Literal["vad", "adaptive"] = Field(
-        default="vad", description="'adaptive' uses LiveKit's hosted interruption model")
+        default="vad", description="'adaptive' uses LiveKit's hosted interruption model"
+    )
     min_duration_s: float = Field(default=0.5, ge=0.0, le=5.0)
     min_words: int = Field(default=0, ge=0, le=10)
     false_interruption_timeout_s: float | None = Field(default=2.0, ge=0.1, le=10.0)
@@ -195,7 +196,8 @@ class ConversationConfig(_Model):
     end_call_enabled: bool = True
     post_call_summary: bool = True
     ivr_detection_outbound: bool = Field(
-        default=True, description="Detect IVR menus/voicemail on outbound calls (LiveKit)")
+        default=True, description="Detect IVR menus/voicemail on outbound calls (LiveKit)"
+    )
 
 
 # --------------------------------------------------------------------------------------------
@@ -220,18 +222,34 @@ STANDARD_TOOLS = (
     "end_call",
 )
 
-CRM_TOOLS = {"lookup_customer", "search_contacts", "create_contact", "update_contact",
-             "create_lead", "update_lead", "add_note"}
-CALENDAR_TOOLS = {"get_appointments", "check_availability", "book_appointment",
-                  "cancel_appointment"}
+CRM_TOOLS = {
+    "lookup_customer",
+    "search_contacts",
+    "create_contact",
+    "update_contact",
+    "create_lead",
+    "update_lead",
+    "add_note",
+}
+CALENDAR_TOOLS = {
+    "get_appointments",
+    "check_availability",
+    "book_appointment",
+    "cancel_appointment",
+}
 
 
 class ToolsConfig(_Model):
     enabled: list[str] = Field(default_factory=list)
     description_overrides: dict[str, str] = Field(default_factory=dict)
     require_confirmation: list[str] = Field(
-        default_factory=lambda: ["book_appointment", "cancel_appointment", "create_lead",
-                                 "update_contact", "send_sms"]
+        default_factory=lambda: [
+            "book_appointment",
+            "cancel_appointment",
+            "create_lead",
+            "update_contact",
+            "send_sms",
+        ]
     )
     timeout_s: float = Field(default=8.0, gt=0, le=30)
     max_calls_per_conversation: int = Field(default=30, ge=1, le=200)

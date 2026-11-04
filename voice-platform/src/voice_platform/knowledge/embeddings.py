@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import math
 import os
 import re
@@ -35,10 +36,57 @@ def fold(text: str) -> str:
 
 
 _TOKEN = re.compile(r"[a-z0-9]+")
-_STOP = {"the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "for", "on", "at",
-         "with", "do", "does", "you", "your", "we", "our", "i", "it", "be", "can", "what",
-         "le", "la", "les", "des", "un", "une", "et", "ou", "de", "du", "en", "est", "pour",
-         "au", "aux", "vous", "nous", "je", "il", "elle", "que", "qui", "quoi", "est-ce"}
+_STOP = {
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "of",
+    "to",
+    "in",
+    "is",
+    "are",
+    "for",
+    "on",
+    "at",
+    "with",
+    "do",
+    "does",
+    "you",
+    "your",
+    "we",
+    "our",
+    "i",
+    "it",
+    "be",
+    "can",
+    "what",
+    "le",
+    "la",
+    "les",
+    "des",
+    "un",
+    "une",
+    "et",
+    "ou",
+    "de",
+    "du",
+    "en",
+    "est",
+    "pour",
+    "au",
+    "aux",
+    "vous",
+    "nous",
+    "je",
+    "il",
+    "elle",
+    "que",
+    "qui",
+    "quoi",
+    "est-ce",
+}
 
 
 def tokens(text: str) -> list[str]:
@@ -60,12 +108,12 @@ class HashingEmbedder:
     def _one(self, text: str) -> list[float]:
         vec = [0.0] * self.dim
         toks = tokens(text)
-        feats = toks + [f"{a}_{b}" for a, b in zip(toks, toks[1:], strict=False)]
+        feats = toks + [f"{a}_{b}" for a, b in itertools.pairwise(toks)]
         for t in toks:
             if len(t) >= 4:
                 feats.append("p4:" + t[:4])  # crude stemming: park / parking / parked
             if len(t) > 4:
-                feats += [t[i:i + 3] for i in range(len(t) - 2)]
+                feats += [t[i : i + 3] for i in range(len(t) - 2)]
         for f in feats:
             h = int.from_bytes(hashlib.blake2b(f.encode(), digest_size=8).digest(), "big")
             idx = h % self.dim
@@ -77,8 +125,13 @@ class OpenAIEmbedder:
     name = "openai"
     dim = EMBEDDING_DIM
 
-    def __init__(self, model: str = "text-embedding-3-small", api_key: str | None = None,
-                 base_url: str = "https://api.openai.com/v1", timeout_s: float = 15.0) -> None:
+    def __init__(
+        self,
+        model: str = "text-embedding-3-small",
+        api_key: str | None = None,
+        base_url: str = "https://api.openai.com/v1",
+        timeout_s: float = 15.0,
+    ) -> None:
         self.model = model
         self._key = api_key or os.environ.get("OPENAI_API_KEY")
         if not self._key:
@@ -88,12 +141,14 @@ class OpenAIEmbedder:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
         for i in range(0, len(texts), 96):
-            batch = [t[:8000] for t in texts[i:i + 96]]
+            batch = [t[:8000] for t in texts[i : i + 96]]
 
             async def call(_attempt: int, batch: list[str] = batch) -> list[list[float]]:
                 resp = await self._client.post(
-                    "/embeddings", headers={"Authorization": f"Bearer {self._key}"},
-                    json={"model": self.model, "input": batch, "dimensions": self.dim})
+                    "/embeddings",
+                    headers={"Authorization": f"Bearer {self._key}"},
+                    json={"model": self.model, "input": batch, "dimensions": self.dim},
+                )
                 if resp.status_code == 429 or resp.status_code >= 500:
                     raise DependencyUnavailableError(f"embeddings HTTP {resp.status_code}")
                 if resp.status_code >= 400:
@@ -101,9 +156,15 @@ class OpenAIEmbedder:
                 data = resp.json()["data"]
                 return [_normalize(d["embedding"]) for d in sorted(data, key=lambda d: d["index"])]
 
-            out.extend(await retry_async(
-                call, policy=RetryPolicy(max_attempts=4, base_delay_s=0.5, max_delay_s=8),
-                is_retryable=lambda e: isinstance(e, DependencyUnavailableError | httpx.TransportError)))
+            out.extend(
+                await retry_async(
+                    call,
+                    policy=RetryPolicy(max_attempts=4, base_delay_s=0.5, max_delay_s=8),
+                    is_retryable=lambda e: isinstance(
+                        e, DependencyUnavailableError | httpx.TransportError
+                    ),
+                )
+            )
         return out
 
     async def aclose(self) -> None:

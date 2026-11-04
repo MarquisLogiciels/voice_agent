@@ -12,8 +12,14 @@ from zoneinfo import ZoneInfo
 
 from ..config.schema import AgentConfig
 
-_LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish", "de": "German",
-               "it": "Italian", "pt": "Portuguese"}
+_LANG_NAMES = {
+    "en": "English",
+    "fr": "French",
+    "es": "Spanish",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+}
 
 
 def _lang_name(code: str) -> str:
@@ -24,8 +30,9 @@ def _lang_name(code: str) -> str:
     return name
 
 
-def build_instructions(cfg: AgentConfig, *, now: datetime, caller_number: str | None,
-                       caller_context: str | None = None) -> str:
+def build_instructions(
+    cfg: AgentConfig, *, now: datetime, caller_number: str | None, caller_context: str | None = None
+) -> str:
     tz = ZoneInfo(cfg.business.timezone)
     local_now = now.astimezone(tz)
     b = cfg.business
@@ -39,12 +46,14 @@ def build_instructions(cfg: AgentConfig, *, now: datetime, caller_number: str | 
     )
     lang_line = f"Speak {_lang_name(cfg.language)} by default."
     if len(langs) > 1:
-        lang_line += (" If the caller speaks one of these languages, switch to it: "
-                      + ", ".join(_lang_name(x) for x in langs[1:]) + ".")
+        lang_line += (
+            " If the caller speaks one of these languages, switch to it: "
+            + ", ".join(_lang_name(x) for x in langs[1:])
+            + "."
+        )
     parts.append(lang_line)
 
-    facts = [f"Current date and time: {local_now.strftime('%A %Y-%m-%d %H:%M')} "
-             f"({b.timezone})."]
+    facts = [f"Current date and time: {local_now.strftime('%A %Y-%m-%d %H:%M')} ({b.timezone})."]
     if b.description:
         facts.append(f"About the business: {b.description}")
     if b.address:
@@ -59,8 +68,10 @@ def build_instructions(cfg: AgentConfig, *, now: datetime, caller_number: str | 
     for k, v in b.facts.items():
         facts.append(f"{k}: {v}")
     if caller_number:
-        facts.append("The caller's phone number is known to the system (do not read it aloud "
-                     "unless asked to confirm it).")
+        facts.append(
+            "The caller's phone number is known to the system (do not read it aloud "
+            "unless asked to confirm it)."
+        )
     if caller_context:
         facts.append(f"Caller context: {caller_context}")
     parts.append("Business facts (authoritative):\n- " + "\n- ".join(facts))
@@ -82,14 +93,18 @@ def build_instructions(cfg: AgentConfig, *, now: datetime, caller_number: str | 
         "a text), read the key details back and get an explicit yes, then call the tool with "
         "caller_confirmed=true.",
         "Use check_availability before proposing appointment times, and only offer the returned "
-        "slots." if "check_availability" in cfg.tools.enabled else "",
+        "slots."
+        if "check_availability" in cfg.tools.enabled
+        else "",
         "If the caller asks for a human, or you cannot resolve their request, use "
-        "transfer_to_human with a concise summary." if cfg.transfer.enabled else
-        "If the caller asks for a human, explain that nobody is available and offer to take a "
+        "transfer_to_human with a concise summary."
+        if cfg.transfer.enabled
+        else "If the caller asks for a human, explain that nobody is available and offer to take a "
         "message.",
         "Use search_knowledge_base for factual questions about services, prices or policies, "
         "and answer only from the excerpts it returns."
-        if "search_knowledge_base" in cfg.tools.enabled else "",
+        if "search_knowledge_base" in cfg.tools.enabled
+        else "",
         "Collect only the personal information needed for the task. Never ask for payment card "
         "numbers, passwords or government ID numbers.",
         "If you didn't understand the caller, ask them to repeat instead of guessing.",

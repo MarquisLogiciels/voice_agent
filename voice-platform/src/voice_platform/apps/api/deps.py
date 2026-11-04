@@ -26,7 +26,8 @@ ServicesDep = Annotated[Services, Depends(get_services)]
 
 
 async def get_principal(
-    request: Request, services: ServicesDep,
+    request: Request,
+    services: ServicesDep,
     authorization: Annotated[str | None, Header()] = None,
 ) -> Principal:
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -34,7 +35,8 @@ async def get_principal(
     token = authorization[7:].strip()
     principal = await Authenticator(services.db, services.settings).authenticate(token)
     decision = await services.rate_limiter.hit(
-        f"api:{principal.actor_label}", limit=services.settings.api_rate_limit_per_minute)
+        f"api:{principal.actor_label}", limit=services.settings.api_rate_limit_per_minute
+    )
     if not decision.allowed:
         raise RateLimitedError("rate limit exceeded", retry_after_s=decision.reset_in_s)
     bind_log_context(actor=principal.actor_label)
@@ -59,14 +61,16 @@ def tenant_ctx(permission: Permission) -> Callable[..., Any]:
     database transaction bound to that tenant (RLS)."""
 
     async def dep(
-        services: ServicesDep, principal: PrincipalDep,
+        services: ServicesDep,
+        principal: PrincipalDep,
         tenant_id: Annotated[uuid.UUID, Path()],
     ) -> AsyncIterator[TenantCtx]:
         role = principal.require(tenant_id, permission)
         bind_log_context(tenant_id=str(tenant_id))
         async with services.db.session(DbScope.for_tenant(tenant_id, principal.user_id)) as s:
-            yield TenantCtx(tenant_id=tenant_id, principal=principal, role=role, session=s,
-                            services=services)
+            yield TenantCtx(
+                tenant_id=tenant_id, principal=principal, role=role, session=s, services=services
+            )
 
     return dep
 

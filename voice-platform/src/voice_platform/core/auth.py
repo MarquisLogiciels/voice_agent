@@ -27,7 +27,7 @@ from .rbac import Principal, Role
 class IssuedToken:
     access_token: str
     expires_at: int
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105 - OAuth token type, not a secret
 
 
 class Authenticator:
@@ -47,9 +47,7 @@ class Authenticator:
             if row.disabled or not verify_password(row.password_hash, password):
                 raise AuthenticationError("invalid credentials")
             await s.execute(
-                sa.text(
-                    "select set_config('app.user_id', :u, true);"
-                ),
+                sa.text("select set_config('app.user_id', :u, true);"),
                 {"u": str(row.id)},
             )
             await s.execute(

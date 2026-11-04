@@ -44,26 +44,55 @@ def scripted_receptionist() -> ScriptedLLM:
             if confirmed:
                 args["caller_confirmed"] = True
             return Reply(tool_calls=[("book_appointment", args)])
+
         return reply
 
-    return ScriptedLLM([
-        when_user(r"book .*on (\d{4}-\d{2}-\d{2})",
-                  lambda m, t: Reply(tool_calls=[("check_availability", {"date": m.group(1)})])),
-        after_tool("check_availability", lambda out, t: Reply(
-            text=f"I have {out['data']['slots'][0]['spoken']}. May I have your name?")),
-        when_user(r"my name is", book(confirmed=False)),
-        after_tool("book_appointment", lambda out, t: Reply(
-            text="Just to confirm: a cleaning for Ana Roy at that time. Correct?")
-            if out.get("error") == "confirmation_required" else
-            Reply(text="You're all set!") if out.get("ok") else
-            Reply(text="Sorry, that didn't work.")),
-        when_user(r"^yes", book(confirmed=True)),
-        when_user(r"person|human", lambda m, t: Reply(tool_calls=[("transfer_to_human", {
-            "reason": "caller asked for a person",
-            "summary": "Ana Roy booked a cleaning and wants to speak to staff."})])),
-        after_tool("transfer_to_human", lambda out, t: Reply(
-            text="Connecting you now." if out.get("ok") else "Nobody is available.")),
-    ])
+    return ScriptedLLM(
+        [
+            when_user(
+                r"book .*on (\d{4}-\d{2}-\d{2})",
+                lambda m, t: Reply(tool_calls=[("check_availability", {"date": m.group(1)})]),
+            ),
+            after_tool(
+                "check_availability",
+                lambda out, t: Reply(
+                    text=f"I have {out['data']['slots'][0]['spoken']}. May I have your name?"
+                ),
+            ),
+            when_user(r"my name is", book(confirmed=False)),
+            after_tool(
+                "book_appointment",
+                lambda out, t: (
+                    Reply(text="Just to confirm: a cleaning for Ana Roy at that time. Correct?")
+                    if out.get("error") == "confirmation_required"
+                    else Reply(text="You're all set!")
+                    if out.get("ok")
+                    else Reply(text="Sorry, that didn't work.")
+                ),
+            ),
+            when_user(r"^yes", book(confirmed=True)),
+            when_user(
+                r"person|human",
+                lambda m, t: Reply(
+                    tool_calls=[
+                        (
+                            "transfer_to_human",
+                            {
+                                "reason": "caller asked for a person",
+                                "summary": "Ana Roy booked a cleaning and wants to speak to staff.",
+                            },
+                        )
+                    ]
+                ),
+            ),
+            after_tool(
+                "transfer_to_human",
+                lambda out, t: Reply(
+                    text="Connecting you now." if out.get("ok") else "Nobody is available."
+                ),
+            ),
+        ]
+    )
 
 
 class RecordingTransport:
@@ -84,16 +113,30 @@ class RecordingTransport:
 
 
 def _resolved() -> ResolvedVersion:
-    cfg = AgentConfig.model_validate(sample_config(
-        tools={"enabled": ["check_availability", "book_appointment", "transfer_to_human"]},
-        integrations={"calendar": "sandbox"},
-        transfer={"enabled": True, "default_destination": "front", "destinations": [
-            {"name": "front", "phone_number": "+15145550100", "fallback": ["manager"]},
-            {"name": "manager", "phone_number": "+15145550101"}]},
-        conversation={"end_call_enabled": False},
-    ))
-    return ResolvedVersion(tenant_id=uuid.uuid4(), agent_id=uuid.uuid4(), version_id=uuid.uuid4(),
-                           version=3, environment="prod", config=cfg, is_canary=False)
+    cfg = AgentConfig.model_validate(
+        sample_config(
+            tools={"enabled": ["check_availability", "book_appointment", "transfer_to_human"]},
+            integrations={"calendar": "sandbox"},
+            transfer={
+                "enabled": True,
+                "default_destination": "front",
+                "destinations": [
+                    {"name": "front", "phone_number": "+15145550100", "fallback": ["manager"]},
+                    {"name": "manager", "phone_number": "+15145550101"},
+                ],
+            },
+            conversation={"end_call_enabled": False},
+        )
+    )
+    return ResolvedVersion(
+        tenant_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        version_id=uuid.uuid4(),
+        version=3,
+        environment="prod",
+        config=cfg,
+        is_canary=False,
+    )
 
 
 async def test_book_then_transfer_full_conversation() -> None:
@@ -104,21 +147,32 @@ async def test_book_then_transfer_full_conversation() -> None:
     llm = scripted_receptionist()
 
     def transfer_factory(session: Any, env: Any) -> TransferManager:
-        return TransferManager(config=env.config.transfer, timezone=env.config.business.timezone,
-                               transport=transport, room_name="call-1", caller_identity="sip_+1",
-                               clock=lambda: NOW)
+        return TransferManager(
+            config=env.config.transfer,
+            timezone=env.config.business.timezone,
+            transport=transport,
+            room_name="call-1",
+            caller_identity="sip_+1",
+            clock=lambda: NOW,
+        )
 
     deps = RuntimeDeps(
         builder=PipelineBuilder(default_registry()),
-        integrations=IntegrationSet(calendar=suite), sink=sink, clock=lambda: NOW,
+        integrations=IntegrationSet(calendar=suite),
+        sink=sink,
+        clock=lambda: NOW,
         transfer_factory=transfer_factory,
-        pipeline_override=BuiltPipeline(mode=PipelineMode.CASCADED, llm=llm,
-                                        turn_detection="manual",
-                                        providers={"llm": ["llm:scripted:-"]}),
+        pipeline_override=BuiltPipeline(
+            mode=PipelineMode.CASCADED,
+            llm=llm,
+            turn_detection="manual",
+            providers={"llm": ["llm:scripted:-"]},
+        ),
         enable_policies=False,
     )
-    rs = build_runtime_session(resolved, CallInfo(conversation_id="conv-e2e",
-                                                  caller_number=CALLER), deps)
+    rs = build_runtime_session(
+        resolved, CallInfo(conversation_id="conv-e2e", caller_number=CALLER), deps
+    )
     async with rs.session as session:
         await session.start(rs.agent)
         r1 = await session.run(user_input="Hi, I'd like to book a cleaning on 2030-01-07")
@@ -144,13 +198,18 @@ async def test_book_then_transfer_full_conversation() -> None:
     kinds = [e["type"] for e in sink.events]
     assert "transcript" in kinds and "tool" in kinds and "lifecycle" in kinds
     tools = [e for e in sink.events if e["type"] == "tool"]
-    assert [t["tool"] for t in tools] == ["check_availability", "book_appointment",
-                                          "book_appointment", "transfer_to_human"]
+    assert [t["tool"] for t in tools] == [
+        "check_availability",
+        "book_appointment",
+        "book_appointment",
+        "transfer_to_human",
+    ]
     assert [t["ok"] for t in tools] == [True, False, True, True]
     assert sink.final is not None and sink.final["status"] == "transferred"
     assert sink.final["metrics"]["tool_calls"] == 4
-    user_lines = [e["text"] for e in sink.events if e["type"] == "transcript"
-                  and e["role"] == "user"]
+    user_lines = [
+        e["text"] for e in sink.events if e["type"] == "transcript" and e["role"] == "user"
+    ]
     assert user_lines[0].startswith("Hi, I'd like to book")
     assert "Operating rules" in rs.agent.instructions
 
@@ -165,16 +224,22 @@ async def test_transfer_failure_everywhere_reports_failure_to_llm() -> None:
     resolved = _resolved()
     deps = RuntimeDeps(
         builder=PipelineBuilder(default_registry()),
-        integrations=IntegrationSet(calendar=SandboxSuite()), clock=lambda: NOW,
+        integrations=IntegrationSet(calendar=SandboxSuite()),
+        clock=lambda: NOW,
         transfer_factory=lambda s, env: TransferManager(
-            config=env.config.transfer, timezone="America/Toronto", transport=transport,
-            room_name="r", caller_identity="c", clock=lambda: NOW),
-        pipeline_override=BuiltPipeline(mode=PipelineMode.CASCADED, llm=scripted_receptionist(),
-                                        turn_detection="manual"),
+            config=env.config.transfer,
+            timezone="America/Toronto",
+            transport=transport,
+            room_name="r",
+            caller_identity="c",
+            clock=lambda: NOW,
+        ),
+        pipeline_override=BuiltPipeline(
+            mode=PipelineMode.CASCADED, llm=scripted_receptionist(), turn_detection="manual"
+        ),
         enable_policies=False,
     )
-    rs = build_runtime_session(resolved, CallInfo(conversation_id="c2", caller_number=CALLER),
-                               deps)
+    rs = build_runtime_session(resolved, CallInfo(conversation_id="c2", caller_number=CALLER), deps)
     async with rs.session as session:
         await session.start(rs.agent)
         result = await session.run(user_input="I want a human")

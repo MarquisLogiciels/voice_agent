@@ -127,6 +127,8 @@ class ProviderDescriptor:
                 "languages": list(caps.languages) if caps.languages else None,
                 "notes": caps.notes,
             },
-            "options_schema": self.options_model.model_json_schema() if self.options_model else None,
+            "options_schema": self.options_model.model_json_schema()
+            if self.options_model
+            else None,
             "health_check": self.health_check is not None,
         }

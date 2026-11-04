@@ -17,14 +17,24 @@ router = APIRouter(prefix="/v1/tenants/{tenant_id}")
 
 
 def _agent(a: AgentRow) -> dict[str, Any]:
-    return {"id": str(a.id), "slug": a.slug, "name": a.name, "description": a.description,
-            "created_at": a.created_at.isoformat()}
+    return {
+        "id": str(a.id),
+        "slug": a.slug,
+        "name": a.name,
+        "description": a.description,
+        "created_at": a.created_at.isoformat(),
+    }
 
 
 def _version(v: AgentVersion, *, with_config: bool = False) -> dict[str, Any]:
     out: dict[str, Any] = {
-        "id": str(v.id), "agent_id": str(v.agent_id), "version": v.version, "status": v.status,
-        "source": v.source, "notes": v.notes, "config_hash": v.config_hash,
+        "id": str(v.id),
+        "agent_id": str(v.agent_id),
+        "version": v.version,
+        "status": v.status,
+        "source": v.source,
+        "notes": v.notes,
+        "config_hash": v.config_hash,
         "parent_version_id": str(v.parent_version_id) if v.parent_version_id else None,
         "created_at": v.created_at.isoformat(),
         "published_at": v.published_at.isoformat() if v.published_at else None,
@@ -35,9 +45,13 @@ def _version(v: AgentVersion, *, with_config: bool = False) -> dict[str, Any]:
 
 
 def _deployment(d: Deployment) -> dict[str, Any]:
-    return {"environment": d.environment, "version_id": str(d.version_id),
-            "canary_version_id": str(d.canary_version_id) if d.canary_version_id else None,
-            "canary_percent": d.canary_percent, "updated_at": d.updated_at.isoformat()}
+    return {
+        "environment": d.environment,
+        "version_id": str(d.version_id),
+        "canary_version_id": str(d.canary_version_id) if d.canary_version_id else None,
+        "canary_percent": d.canary_percent,
+        "updated_at": d.updated_at.isoformat(),
+    }
 
 
 class AgentIn(BaseModel):
@@ -48,10 +62,12 @@ class AgentIn(BaseModel):
 
 
 @router.post("/agents", status_code=201)
-async def create_agent(body: AgentIn, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_WRITE))
-                       ) -> dict[str, Any]:
+async def create_agent(
+    body: AgentIn, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_WRITE))
+) -> dict[str, Any]:
     agent, version = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).create_agent(
-        slug=body.slug, name=body.name, description=body.description, config=body.config)
+        slug=body.slug, name=body.name, description=body.description, config=body.config
+    )
     return {**_agent(agent), "draft": _version(version)}
 
 
@@ -66,18 +82,23 @@ async def list_agents(ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))) -> li
 
 
 @router.get("/agents/{agent_id}")
-async def get_agent(agent_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))
-                    ) -> dict[str, Any]:
+async def get_agent(
+    agent_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))
+) -> dict[str, Any]:
     svc = AgentService(ctx.session, ctx.tenant_id, ctx.principal)
     a = await svc.get_agent(agent_id)
     versions = await svc.list_versions(agent_id)
-    return {**_agent(a), "versions": [_version(v) for v in versions],
-            "deployments": [_deployment(d) for d in await svc.list_deployments(agent_id)]}
+    return {
+        **_agent(a),
+        "versions": [_version(v) for v in versions],
+        "deployments": [_deployment(d) for d in await svc.list_deployments(agent_id)],
+    }
 
 
 @router.delete("/agents/{agent_id}", status_code=204)
-async def archive_agent(agent_id: uuid.UUID,
-                        ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_PUBLISH))) -> None:
+async def archive_agent(
+    agent_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_PUBLISH))
+) -> None:
     await AgentService(ctx.session, ctx.tenant_id, ctx.principal).archive_agent(agent_id)
 
 
@@ -88,16 +109,19 @@ class ConfigIn(BaseModel):
 
 
 @router.post("/agents/{agent_id}/versions", status_code=201)
-async def create_version(agent_id: uuid.UUID, body: ConfigIn,
-                         ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_WRITE))) -> dict[str, Any]:
+async def create_version(
+    agent_id: uuid.UUID, body: ConfigIn, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_WRITE))
+) -> dict[str, Any]:
     v = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).create_draft(
-        agent_id, body.config, notes=body.notes, parent_version_id=body.parent_version_id)
+        agent_id, body.config, notes=body.notes, parent_version_id=body.parent_version_id
+    )
     return _version(v, with_config=True)
 
 
 @router.get("/versions/{version_id}")
-async def get_version(version_id: uuid.UUID,
-                      ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))) -> dict[str, Any]:
+async def get_version(
+    version_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))
+) -> dict[str, Any]:
     v = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).get_version(version_id)
     return _version(v, with_config=True)
 
@@ -108,23 +132,27 @@ class DraftPatch(BaseModel):
 
 
 @router.put("/versions/{version_id}")
-async def update_draft(version_id: uuid.UUID, body: DraftPatch,
-                       ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_WRITE))) -> dict[str, Any]:
+async def update_draft(
+    version_id: uuid.UUID, body: DraftPatch, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_WRITE))
+) -> dict[str, Any]:
     v = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).update_draft(
-        version_id, body.config, body.notes)
+        version_id, body.config, body.notes
+    )
     return _version(v, with_config=True)
 
 
 @router.post("/versions/{version_id}/publish")
-async def publish(version_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_PUBLISH))
-                  ) -> dict[str, Any]:
+async def publish(
+    version_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_PUBLISH))
+) -> dict[str, Any]:
     v = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).publish(version_id)
     return _version(v)
 
 
 @router.get("/versions/{from_id}/diff/{to_id}")
-async def diff(from_id: uuid.UUID, to_id: uuid.UUID,
-               ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))) -> list[dict[str, Any]]:
+async def diff(
+    from_id: uuid.UUID, to_id: uuid.UUID, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))
+) -> list[dict[str, Any]]:
     changes = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).diff(from_id, to_id)
     return [c.as_dict() for c in changes]
 
@@ -135,13 +163,16 @@ class ValidateIn(BaseModel):
 
 
 @router.post("/agents/validate")
-async def validate(body: ValidateIn, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))
-                   ) -> dict[str, Any]:
+async def validate(
+    body: ValidateIn, ctx: TenantCtx = Depends(tenant_ctx(P.AGENTS_READ))
+) -> dict[str, Any]:
     """Schema validation + provider/capability checks without saving anything."""
     cfg: AgentConfig = parse_config(body.config).materialize(body.environment)
     problems = ctx.services.builder.validate(cfg.pipeline, BuildContext(), check_secrets=False)
-    return {"valid": not [p for p in problems if p.severity == "error"],
-            "problems": [p.as_dict() for p in problems]}
+    return {
+        "valid": not [p for p in problems if p.severity == "error"],
+        "problems": [p.as_dict() for p in problems],
+    }
 
 
 class DeployIn(BaseModel):
@@ -166,32 +197,49 @@ def _env(environment: str) -> str:
 
 
 @router.put("/agents/{agent_id}/deployments/{environment}")
-async def deploy(agent_id: uuid.UUID, environment: str, body: DeployIn,
-                 ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE))) -> dict[str, Any]:
+async def deploy(
+    agent_id: uuid.UUID,
+    environment: str,
+    body: DeployIn,
+    ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE)),
+) -> dict[str, Any]:
     d = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).deploy(
-        agent_id, _env(environment), body.version_id)
+        agent_id, _env(environment), body.version_id
+    )
     return _deployment(d)
 
 
 @router.put("/agents/{agent_id}/deployments/{environment}/canary")
-async def canary(agent_id: uuid.UUID, environment: str, body: CanaryIn,
-                 ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE))) -> dict[str, Any]:
+async def canary(
+    agent_id: uuid.UUID,
+    environment: str,
+    body: CanaryIn,
+    ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE)),
+) -> dict[str, Any]:
     d = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).set_canary(
-        agent_id, _env(environment), body.version_id, body.percent)
+        agent_id, _env(environment), body.version_id, body.percent
+    )
     return _deployment(d)
 
 
 @router.post("/agents/{agent_id}/deployments/{environment}/promote")
-async def promote(agent_id: uuid.UUID, environment: str,
-                  ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE))) -> dict[str, Any]:
+async def promote(
+    agent_id: uuid.UUID, environment: str, ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE))
+) -> dict[str, Any]:
     d = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).promote_canary(
-        agent_id, _env(environment))
+        agent_id, _env(environment)
+    )
     return _deployment(d)
 
 
 @router.post("/agents/{agent_id}/deployments/{environment}/rollback")
-async def rollback(agent_id: uuid.UUID, environment: str, body: RollbackIn,
-                   ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE))) -> dict[str, Any]:
+async def rollback(
+    agent_id: uuid.UUID,
+    environment: str,
+    body: RollbackIn,
+    ctx: TenantCtx = Depends(tenant_ctx(P.DEPLOYMENTS_WRITE)),
+) -> dict[str, Any]:
     d = await AgentService(ctx.session, ctx.tenant_id, ctx.principal).rollback(
-        agent_id, _env(environment), body.version_id)
+        agent_id, _env(environment), body.version_id
+    )
     return _deployment(d)

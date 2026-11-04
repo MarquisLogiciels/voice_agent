@@ -53,7 +53,9 @@ class RateLimiter:
 
     async def hit(self, key: str, *, limit: int, window_s: int = 60) -> RateDecision:
         count, reset = await self._hit(key, window_s)
-        return RateDecision(allowed=count <= limit, remaining=max(0, limit - count), reset_in_s=reset)
+        return RateDecision(
+            allowed=count <= limit, remaining=max(0, limit - count), reset_in_s=reset
+        )
 
     async def _hit(self, key: str, window_s: int) -> tuple[int, float]:
         if self._redis is not None and (

@@ -55,19 +55,44 @@ class LocalPostgres:
             shutil.chown(datadir, user="postgres")
             run_as = ["runuser", "-u", "postgres", "--"]
         subprocess.run(
-            [*run_as, _find_bin("initdb"), "-D", str(datadir), "-U", user, "-A", "trust",
-             "--no-sync", "-E", "UTF8"],
-            check=True, capture_output=True, env=env,
+            [
+                *run_as,
+                _find_bin("initdb"),
+                "-D",
+                str(datadir),
+                "-U",
+                user,
+                "-A",
+                "trust",
+                "--no-sync",
+                "-E",
+                "UTF8",
+            ],
+            check=True,
+            capture_output=True,
+            env=env,
         )
         sockdir = datadir / "sock"
         sockdir.mkdir()
         if run_as:
             shutil.chown(sockdir, user="postgres")
         subprocess.run(
-            [*run_as, _find_bin("pg_ctl"), "-D", str(datadir), "-w", "-l", str(datadir / "log"),
-             "-o", f"-p {port} -k {sockdir} -c fsync=off -c synchronous_commit=off "
-                   f"-c full_page_writes=off -c listen_addresses=127.0.0.1", "start"],
-            check=True, capture_output=True, env=env,
+            [
+                *run_as,
+                _find_bin("pg_ctl"),
+                "-D",
+                str(datadir),
+                "-w",
+                "-l",
+                str(datadir / "log"),
+                "-o",
+                f"-p {port} -k {sockdir} -c fsync=off -c synchronous_commit=off "
+                f"-c full_page_writes=off -c listen_addresses=127.0.0.1",
+                "start",
+            ],
+            check=True,
+            capture_output=True,
+            env=env,
         )
         pg = cls(datadir=datadir, port=port)
         pg._bootstrap()
@@ -75,9 +100,24 @@ class LocalPostgres:
 
     def psql(self, sql: str, db: str = "postgres") -> None:
         subprocess.run(
-            [_find_bin("psql"), "-h", "127.0.0.1", "-p", str(self.port), "-U", "postgres",
-             "-d", db, "-v", "ON_ERROR_STOP=1", "-q", "-c", sql],
-            check=True, capture_output=True,
+            [
+                _find_bin("psql"),
+                "-h",
+                "127.0.0.1",
+                "-p",
+                str(self.port),
+                "-U",
+                "postgres",
+                "-d",
+                db,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-q",
+                "-c",
+                sql,
+            ],
+            check=True,
+            capture_output=True,
         )
 
     def _bootstrap(self) -> None:

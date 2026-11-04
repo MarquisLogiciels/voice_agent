@@ -10,7 +10,8 @@ from typing import Any
 
 import httpx
 
-from ..observability.metrics import INTEGRATION_REQUESTS, INTEGRATION_LATENCY
+from ..observability.metrics import INTEGRATION_LATENCY, INTEGRATION_REQUESTS
+from ..observability.tracing import span_attrs, tracer
 from ..shared.http import EgressBlockedError, EgressPolicy, ResponseTooLargeError, read_limited
 from ..shared.logging import get_logger, redact_value
 from ..shared.resilience import CircuitBreaker, CircuitOpenError, RetryPolicy, retry_async
@@ -81,20 +82,25 @@ class IntegrationHttpClient:
         self.integration = integration
         self._egress = egress
         self._auth = auth
-        self._retry = retry or RetryPolicy(max_attempts=3, base_delay_s=0.3, max_delay_s=3.0,
-                                           deadline_s=timeout_s * 1.5)
+        self._retry = retry or RetryPolicy(
+            max_attempts=3, base_delay_s=0.3, max_delay_s=3.0, deadline_s=timeout_s * 1.5
+        )
         self._max_response = max_response_bytes
         self._max_request = max_request_bytes
-        self.breaker = breaker or CircuitBreaker(integration, failure_threshold=5,
-                                                 recovery_timeout_s=30)
+        self.breaker = breaker or CircuitBreaker(
+            integration, failure_threshold=5, recovery_timeout_s=30
+        )
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=httpx.Timeout(timeout_s, connect=min(4.0, timeout_s)),
             transport=transport or _GuardedTransport(egress),
             follow_redirects=False,
             trust_env=False,
-            headers={"User-Agent": "voice-platform/0.1", "Accept": "application/json",
-                     **(default_headers or {})},
+            headers={
+                "User-Agent": "voice-platform/0.1",
+                "Accept": "application/json",
+                **(default_headers or {}),
+            },
         )
 
     async def aclose(self) -> None:
@@ -127,15 +133,17 @@ class IntegrationHttpClient:
             body = json.dumps(json_body, separators=(",", ":"), default=str).encode()
             req_headers.setdefault("Content-Type", "application/json")
         if body is not None and len(body) > self._max_request:
-            raise IntegrationError(ErrorKind.VALIDATION, "request body too large",
-                                   integration=self.integration)
+            raise IntegrationError(
+                ErrorKind.VALIDATION, "request body too large", integration=self.integration
+            )
 
         async def attempt(n: int) -> httpx.Response:
             try:
                 self.breaker.check()
             except CircuitOpenError as e:
-                raise IntegrationError(ErrorKind.UNAVAILABLE, str(e),
-                                       integration=self.integration) from e
+                raise IntegrationError(
+                    ErrorKind.UNAVAILABLE, str(e), integration=self.integration
+                ) from e
             request = self._client.build_request(
                 method, path, params=params, content=body, data=data, headers=req_headers
             )
@@ -153,21 +161,29 @@ class IntegrationHttpClient:
                 resp._content = content  # body is now fully read (bounded)
                 status_label = str(resp.status_code)
             except EgressBlockedError as e:
-                raise IntegrationError(ErrorKind.CONFIGURATION, str(e),
-                                       integration=self.integration) from e
+                raise IntegrationError(
+                    ErrorKind.CONFIGURATION, str(e), integration=self.integration
+                ) from e
             except ResponseTooLargeError as e:
-                raise IntegrationError(ErrorKind.UNKNOWN, "response too large",
-                                       integration=self.integration) from e
+                raise IntegrationError(
+                    ErrorKind.UNKNOWN, "response too large", integration=self.integration
+                ) from e
             except httpx.TimeoutException as e:
                 self.breaker.record_failure()
-                raise IntegrationError(ErrorKind.TIMEOUT, f"{operation} timed out",
-                                       integration=self.integration, ambiguous=not safe) from e
+                raise IntegrationError(
+                    ErrorKind.TIMEOUT,
+                    f"{operation} timed out",
+                    integration=self.integration,
+                    ambiguous=not safe,
+                ) from e
             except httpx.TransportError as e:
                 self.breaker.record_failure()
-                raise IntegrationError(ErrorKind.UNAVAILABLE, f"{operation} network error",
-                                       integration=self.integration,
-                                       ambiguous=not safe and not isinstance(e, httpx.ConnectError)
-                                       ) from e
+                raise IntegrationError(
+                    ErrorKind.UNAVAILABLE,
+                    f"{operation} network error",
+                    integration=self.integration,
+                    ambiguous=not safe and not isinstance(e, httpx.ConnectError),
+                ) from e
             finally:
                 elapsed = time.perf_counter() - started
                 INTEGRATION_LATENCY.labels(self.integration, operation).observe(elapsed)
@@ -183,13 +199,18 @@ class IntegrationHttpClient:
             kind = classify_status(resp.status_code)
             logger.warning(
                 "integration request failed",
-                extra={"integration": self.integration, "operation": operation,
-                       "status": resp.status_code,
-                       "body": redact_value(resp.text[:500])},
+                extra={
+                    "integration": self.integration,
+                    "operation": operation,
+                    "status": resp.status_code,
+                    "body": redact_value(resp.text[:500]),
+                },
             )
             raise IntegrationError(
-                kind, f"{operation} failed with HTTP {resp.status_code}",
-                status=resp.status_code, retry_after_s=_retry_after(resp),
+                kind,
+                f"{operation} failed with HTTP {resp.status_code}",
+                status=resp.status_code,
+                retry_after_s=_retry_after(resp),
                 integration=self.integration,
                 ambiguous=(not safe and resp.status_code >= 500),
             )
@@ -201,6 +222,13 @@ class IntegrationHttpClient:
                 return True  # request was rejected, never processed
             return safe and e.retryable
 
+        with tracer.start_as_current_span(
+            "vp.integration",
+            attributes=span_attrs(integration=self.integration, operation=operation, method=method),
+        ):
+            return await self._retry_call(attempt, is_retryable, operation)
+
+    async def _retry_call(self, attempt: Any, is_retryable: Any, operation: str) -> httpx.Response:
         return await retry_async(
             attempt,
             policy=self._retry,
@@ -208,8 +236,13 @@ class IntegrationHttpClient:
             retry_after=lambda e: getattr(e, "retry_after_s", None),
             on_retry=lambda n, e, d: logger.info(
                 "retrying integration request",
-                extra={"integration": self.integration, "operation": operation, "attempt": n,
-                       "delay_s": round(d, 3), "error": str(e)},
+                extra={
+                    "integration": self.integration,
+                    "operation": operation,
+                    "attempt": n,
+                    "delay_s": round(d, 3),
+                    "error": str(e),
+                },
             ),
         )
 
@@ -220,8 +253,9 @@ class IntegrationHttpClient:
         try:
             return resp.json()
         except ValueError as e:
-            raise IntegrationError(ErrorKind.UNKNOWN, "invalid JSON from integration",
-                                   integration=self.integration) from e
+            raise IntegrationError(
+                ErrorKind.UNKNOWN, "invalid JSON from integration", integration=self.integration
+            ) from e
 
     async def paginate(
         self,

@@ -46,8 +46,7 @@ class _Args(BaseModel):
 class _Confirmed(_Args):
     caller_confirmed: bool = Field(
         default=False,
-        description="True only after you read the details back and the caller explicitly said "
-        "yes.",
+        description="True only after you read the details back and the caller explicitly said yes.",
     )
 
 
@@ -65,15 +64,19 @@ class ToolSpec:
     dedupe: bool = False
     """Identical calls within a conversation replay the first result (idempotency)."""
 
-    def llm_schema(self, description: str | None = None, *, require_confirmation: bool = False
-                   ) -> dict[str, Any]:
+    def llm_schema(
+        self, description: str | None = None, *, require_confirmation: bool = False
+    ) -> dict[str, Any]:
         schema = _simplify(self.args.model_json_schema())
         if not require_confirmation:
             schema["properties"].pop("caller_confirmed", None)
             if "required" in schema:
                 schema["required"] = [r for r in schema["required"] if r != "caller_confirmed"]
-        return {"name": self.name, "description": description or self.description,
-                "parameters": schema}
+        return {
+            "name": self.name,
+            "description": description or self.description,
+            "parameters": schema,
+        }
 
 
 def _simplify(schema: dict[str, Any]) -> dict[str, Any]:
@@ -96,7 +99,7 @@ def _simplify(schema: dict[str, Any]) -> dict[str, Any]:
             return [walk(v) for v in node]
         return node
 
-    out = walk(schema)
+    out: dict[str, Any] = walk(schema)
     out.setdefault("properties", {})
     out["type"] = "object"
     out["additionalProperties"] = False
@@ -120,8 +123,9 @@ def _tz(env: ToolEnv) -> ZoneInfo:
 
 
 class LookupCustomerArgs(_Args):
-    phone: str | None = Field(default=None, description="Phone number to look up. Omit to use "
-                              "the caller's number.")
+    phone: str | None = Field(
+        default=None, description="Phone number to look up. Omit to use the caller's number."
+    )
 
 
 async def lookup_customer(env: ToolEnv, a: LookupCustomerArgs) -> dict[str, Any]:
@@ -132,9 +136,13 @@ async def lookup_customer(env: ToolEnv, a: LookupCustomerArgs) -> dict[str, Any]
     contacts = await crm.find_contacts_by_phone(phone)
     if contacts:
         env.state.identified_contact_id = contacts[0].id
-    return {"found": bool(contacts), "contacts": [
-        {"contact_id": c.id, "name": c.full_name, "email": c.email, "company": c.company}
-        for c in contacts[:3]]}
+    return {
+        "found": bool(contacts),
+        "contacts": [
+            {"contact_id": c.id, "name": c.full_name, "email": c.email, "company": c.company}
+            for c in contacts[:3]
+        ],
+    }
 
 
 class SearchContactsArgs(_Args):
@@ -144,8 +152,12 @@ class SearchContactsArgs(_Args):
 async def search_contacts(env: ToolEnv, a: SearchContactsArgs) -> dict[str, Any]:
     crm = _require(env, "crm")
     contacts = await crm.search_contacts(a.query, limit=5)
-    return {"count": len(contacts), "contacts": [
-        {"contact_id": c.id, "name": c.full_name, "company": c.company} for c in contacts]}
+    return {
+        "count": len(contacts),
+        "contacts": [
+            {"contact_id": c.id, "name": c.full_name, "company": c.company} for c in contacts
+        ],
+    }
 
 
 class CreateContactArgs(_Confirmed):
@@ -161,9 +173,16 @@ async def create_contact(env: ToolEnv, a: CreateContactArgs) -> dict[str, Any]:
     crm = _require(env, "crm")
     phone = try_normalize_e164(a.phone or env.caller_number or "")
     contact = await crm.create_contact(
-        ContactInput(first_name=a.first_name, last_name=a.last_name, email=a.email, phone=phone,
-                     company=a.company, notes=a.notes),
-        idempotency_key=f"{env.conversation_id}:create_contact:{phone or a.first_name}")
+        ContactInput(
+            first_name=a.first_name,
+            last_name=a.last_name,
+            email=a.email,
+            phone=phone,
+            company=a.company,
+            notes=a.notes,
+        ),
+        idempotency_key=f"{env.conversation_id}:create_contact:{phone or a.first_name}",
+    )
     env.state.identified_contact_id = contact.id
     return {"contact_id": contact.id, "name": contact.full_name}
 
@@ -181,8 +200,13 @@ async def update_contact(env: ToolEnv, a: UpdateContactArgs) -> dict[str, Any]:
     crm = _require(env, "crm")
     if env.state.identified_contact_id and a.contact_id != env.state.identified_contact_id:
         raise ToolRefusal("not_permitted", "You can only update the caller's own record.")
-    upd = ContactUpdate(first_name=a.first_name, last_name=a.last_name, email=a.email,
-                        phone=try_normalize_e164(a.phone) if a.phone else None, company=a.company)
+    upd = ContactUpdate(
+        first_name=a.first_name,
+        last_name=a.last_name,
+        email=a.email,
+        phone=try_normalize_e164(a.phone) if a.phone else None,
+        company=a.company,
+    )
     if not upd.changes():
         raise ToolRefusal("invalid_arguments", "No fields to update were provided.")
     contact = await crm.update_contact(a.contact_id, upd)
@@ -204,10 +228,18 @@ async def create_lead(env: ToolEnv, a: CreateLeadArgs) -> dict[str, Any]:
     crm = _require(env, "crm")
     phone = try_normalize_e164(a.phone or env.caller_number or "")
     lead = await crm.create_lead(
-        LeadInput(title=a.title, description=a.description, first_name=a.first_name,
-                  last_name=a.last_name, phone=phone, email=a.email, company=a.company,
-                  contact_id=a.contact_id or env.state.identified_contact_id),
-        idempotency_key=f"{env.conversation_id}:create_lead:{a.title.lower()}")
+        LeadInput(
+            title=a.title,
+            description=a.description,
+            first_name=a.first_name,
+            last_name=a.last_name,
+            phone=phone,
+            email=a.email,
+            company=a.company,
+            contact_id=a.contact_id or env.state.identified_contact_id,
+        ),
+        idempotency_key=f"{env.conversation_id}:create_lead:{a.title.lower()}",
+    )
     return {"lead_id": lead.id, "title": lead.title}
 
 
@@ -219,8 +251,7 @@ class UpdateLeadArgs(_Confirmed):
 
 async def update_lead(env: ToolEnv, a: UpdateLeadArgs) -> dict[str, Any]:
     crm = _require(env, "crm")
-    lead = await crm.update_lead(a.lead_id, LeadUpdate(status=a.status,
-                                                       description=a.description))
+    lead = await crm.update_lead(a.lead_id, LeadUpdate(status=a.status, description=a.description))
     return {"lead_id": lead.id, "status": lead.status}
 
 
@@ -234,8 +265,9 @@ async def add_note(env: ToolEnv, a: AddNoteArgs) -> dict[str, Any]:
     contact_id = a.contact_id or env.state.identified_contact_id
     if not contact_id:
         raise ToolRefusal("invalid_arguments", "Look up or create the contact first.")
-    note_id = await crm.add_note(contact_id, a.text,
-                                 idempotency_key=f"{env.conversation_id}:note:{stable_hash(a.text)[:16]}")
+    note_id = await crm.add_note(
+        contact_id, a.text, idempotency_key=f"{env.conversation_id}:note:{stable_hash(a.text)[:16]}"
+    )
     return {"note_id": note_id}
 
 
@@ -264,15 +296,23 @@ async def check_availability(env: ToolEnv, a: CheckAvailabilityArgs) -> dict[str
     day = _parse_day(a.date, env)
     start = datetime.combine(day, datetime.min.time(), tz)
     busy = await cal.busy_intervals(start, start + timedelta(days=1))
-    slots = free_slots(day=day, policy=policy, tz=tz, busy=busy, now=env.clock(),
-                       duration_min=a.duration_minutes, preference=a.time_preference)
+    slots = free_slots(
+        day=day,
+        policy=policy,
+        tz=tz,
+        busy=busy,
+        now=env.clock(),
+        duration_min=a.duration_minutes,
+        preference=a.time_preference,
+    )
     env.state.offered_slots = slots
     lang = env.config.language
     return {
         "date": day.isoformat(),
         "available": bool(slots),
-        "slots": [{"start": s.start.isoformat(), "spoken": speakable(s.start, tz, lang)}
-                  for s in slots],
+        "slots": [
+            {"start": s.start.isoformat(), "spoken": speakable(s.start, tz, lang)} for s in slots
+        ],
         "note": None if slots else "No openings that day; offer to check another day.",
     }
 
@@ -286,8 +326,11 @@ async def get_appointments(env: ToolEnv, a: GetAppointmentsArgs) -> dict[str, An
     tz = _tz(env)
     caller = try_normalize_e164(env.caller_number or "")
     if not caller:
-        raise ToolRefusal("not_permitted", "Appointments can only be looked up for the caller's "
-                          "own phone number, which is unavailable.")
+        raise ToolRefusal(
+            "not_permitted",
+            "Appointments can only be looked up for the caller's "
+            "own phone number, which is unavailable.",
+        )
     if a.date:
         day = _parse_day(a.date, env)
         start = datetime.combine(day, datetime.min.time(), tz)
@@ -298,9 +341,17 @@ async def get_appointments(env: ToolEnv, a: GetAppointmentsArgs) -> dict[str, An
     appts = await cal.list_appointments(start, end)
     # Privacy: never disclose other people's appointments.
     mine = [x for x in appts if try_normalize_e164(x.attendee_phone or "") == caller]
-    return {"appointments": [
-        {"appointment_id": x.id, "title": x.title, "start": x.start.isoformat(),
-         "spoken": speakable(x.start, tz, env.config.language)} for x in mine]}
+    return {
+        "appointments": [
+            {
+                "appointment_id": x.id,
+                "title": x.title,
+                "start": x.start.isoformat(),
+                "spoken": speakable(x.start, tz, env.config.language),
+            }
+            for x in mine
+        ]
+    }
 
 
 class BookAppointmentArgs(_Confirmed):
@@ -339,16 +390,28 @@ async def book_appointment(env: ToolEnv, a: BookAppointmentArgs) -> dict[str, An
     # Never trust the LLM: re-check the calendar right before booking.
     busy = await cal.busy_intervals(start - timedelta(minutes=1), end + timedelta(minutes=1))
     if overlaps(start, end, busy):
-        raise ToolRefusal("slot_unavailable", "That slot was just taken. Call "
-                          "check_availability again and offer other times.")
+        raise ToolRefusal(
+            "slot_unavailable",
+            "That slot was just taken. Call check_availability again and offer other times.",
+        )
     phone = try_normalize_e164(a.attendee_phone or env.caller_number or "")
     appt = await cal.create_appointment(
-        AppointmentInput(start=start, end=end, title=f"{a.reason} — {a.attendee_name}",
-                         attendee_name=a.attendee_name, attendee_phone=phone,
-                         attendee_email=a.attendee_email),
-        idempotency_key=f"{env.conversation_id}:book:{start.isoformat()}")
-    return {"appointment_id": appt.id, "start": appt.start.isoformat(),
-            "spoken": speakable(appt.start, tz, env.config.language), "confirmed": True}
+        AppointmentInput(
+            start=start,
+            end=end,
+            title=f"{a.reason} — {a.attendee_name}",
+            attendee_name=a.attendee_name,
+            attendee_phone=phone,
+            attendee_email=a.attendee_email,
+        ),
+        idempotency_key=f"{env.conversation_id}:book:{start.isoformat()}",
+    )
+    return {
+        "appointment_id": appt.id,
+        "start": appt.start.isoformat(),
+        "spoken": speakable(appt.start, tz, env.config.language),
+        "confirmed": True,
+    }
 
 
 class CancelAppointmentArgs(_Confirmed):
@@ -362,8 +425,10 @@ async def cancel_appointment(env: ToolEnv, a: CancelAppointmentArgs) -> dict[str
         raise ToolRefusal("not_found", "No such upcoming appointment.")
     caller = try_normalize_e164(env.caller_number or "")
     if not caller or try_normalize_e164(appt.attendee_phone or "") != caller:
-        raise ToolRefusal("not_permitted", "Only the person who booked can cancel by phone; "
-                          "offer to transfer to staff.")
+        raise ToolRefusal(
+            "not_permitted",
+            "Only the person who booked can cancel by phone; offer to transfer to staff.",
+        )
     await cal.cancel_appointment(a.appointment_id)
     return {"appointment_id": a.appointment_id, "cancelled": True}
 
@@ -383,17 +448,27 @@ async def search_knowledge_base(env: ToolEnv, a: SearchKnowledgeArgs) -> dict[st
     hits = await env.knowledge.search(a.query, top_k=env.config.knowledge.top_k)
     hits = [h for h in hits if h.score >= env.config.knowledge.min_score]
     return {
-        "results": [{"source": h.document_title, "excerpt": h.content[:1200],
-                     "relevance": round(h.score, 3)} for h in hits],
+        "results": [
+            {
+                "source": h.document_title,
+                "excerpt": h.content[:1200],
+                "relevance": round(h.score, 3),
+            }
+            for h in hits
+        ],
         "guidance": "Answer only from these excerpts. If they do not contain the answer, say "
-                    "you don't know and offer to take a message or transfer.",
+        "you don't know and offer to take a message or transfer.",
     }
 
 
 class TransferArgs(_Args):
     reason: str = Field(min_length=3, max_length=300, description="Why the caller needs a human")
-    summary: str = Field(min_length=10, max_length=800, description="Short handoff summary for "
-                         "the human: who is calling, what they need, what was done")
+    summary: str = Field(
+        min_length=10,
+        max_length=800,
+        description="Short handoff summary for "
+        "the human: who is calling, what they need, what was done",
+    )
     destination: str | None = Field(default=None, description="Destination name, if known")
 
 
@@ -404,13 +479,18 @@ async def transfer_to_human(env: ToolEnv, a: TransferArgs) -> dict[str, Any]:
     if a.destination and a.destination not in names:
         raise ToolRefusal("invalid_arguments", f"Unknown destination. Valid: {', '.join(names)}")
     env.state.transfer_attempted = True
-    result = await env.transfer.transfer(reason=a.reason, destination=a.destination,
-                                         summary=a.summary)
+    result = await env.transfer.transfer(
+        reason=a.reason, destination=a.destination, summary=a.summary
+    )
     env.state.transfer_result = result
     if not result.ok:
         raise ToolRefusal(f"transfer_{result.status}", result.message)
-    return {"transferred": True, "destination": result.destination, "mode": result.mode,
-            "status": result.status}
+    return {
+        "transferred": True,
+        "destination": result.destination,
+        "mode": result.mode,
+        "status": result.status,
+    }
 
 
 class SendSmsArgs(_Confirmed):
@@ -426,8 +506,9 @@ async def send_sms(env: ToolEnv, a: SendSmsArgs) -> dict[str, Any]:
         raise ToolRefusal("limit_reached", "The message limit for this call was reached.")
     template = sms.allowed_templates.get(a.template)
     if template is None:
-        raise ToolRefusal("invalid_arguments",
-                          f"Unknown template. Valid: {', '.join(sms.allowed_templates)}")
+        raise ToolRefusal(
+            "invalid_arguments", f"Unknown template. Valid: {', '.join(sms.allowed_templates)}"
+        )
     to = try_normalize_e164(a.to or env.caller_number or "")
     caller = try_normalize_e164(env.caller_number or "")
     if not to:
@@ -441,44 +522,138 @@ async def send_sms(env: ToolEnv, a: SendSmsArgs) -> dict[str, Any]:
     from_number = sms.from_number or env.sms_from_number
     if not from_number:
         raise IntegrationError(ErrorKind.CONFIGURATION, "no SMS sender number configured")
-    result = await messaging.send_sms(to=to, body=body, from_number=from_number,
-                                      idempotency_key=f"{env.conversation_id}:sms:{a.template}")
+    result = await messaging.send_sms(
+        to=to,
+        body=body,
+        from_number=from_number,
+        idempotency_key=f"{env.conversation_id}:sms:{a.template}",
+    )
     env.state.sms_sent += 1
     return {"message_id": result.id, "status": result.status}
 
 
-CATALOG: dict[str, ToolSpec] = {t.name: t for t in [
-    ToolSpec("lookup_customer", "Look up the caller (or a given phone number) in the CRM. Call "
-             "this early to personalize the conversation.", LookupCustomerArgs, lookup_customer,
-             "crm"),
-    ToolSpec("search_contacts", "Search CRM contacts by name, email or company.",
-             SearchContactsArgs, search_contacts, "crm"),
-    ToolSpec("create_contact", "Create a CRM contact for a new caller.", CreateContactArgs,
-             create_contact, "crm", consequential=True, dedupe=True),
-    ToolSpec("update_contact", "Update the caller's CRM contact details.", UpdateContactArgs,
-             update_contact, "crm", consequential=True, dedupe=True),
-    ToolSpec("create_lead", "Record a sales lead / service request in the CRM.", CreateLeadArgs,
-             create_lead, "crm", consequential=True, dedupe=True),
-    ToolSpec("update_lead", "Update an existing lead's status or description.", UpdateLeadArgs,
-             update_lead, "crm", consequential=True, dedupe=True),
-    ToolSpec("add_note", "Attach a short note about this call to the caller's CRM record.",
-             AddNoteArgs, add_note, "crm", consequential=True, dedupe=True),
-    ToolSpec("check_availability", "List open appointment slots on a given day. Always call this "
-             "before offering times.", CheckAvailabilityArgs, check_availability, "calendar"),
-    ToolSpec("get_appointments", "List the caller's own upcoming appointments.",
-             GetAppointmentsArgs, get_appointments, "calendar"),
-    ToolSpec("book_appointment", "Book an appointment in a slot returned by check_availability. "
-             "Only call after the caller confirmed the time, name and reason.",
-             BookAppointmentArgs, book_appointment, "calendar", consequential=True, dedupe=True),
-    ToolSpec("cancel_appointment", "Cancel one of the caller's appointments.",
-             CancelAppointmentArgs, cancel_appointment, "calendar", consequential=True,
-             dedupe=True),
-    ToolSpec("search_knowledge_base", "Search the business knowledge base for facts (services, "
-             "prices, policies). Use before answering factual questions.", SearchKnowledgeArgs,
-             search_knowledge_base, "knowledge"),
-    ToolSpec("transfer_to_human", "Transfer the live call to a human when the caller asks for a "
-             "person, or when you cannot resolve the request.", TransferArgs, transfer_to_human,
-             "transfer", consequential=True, dedupe=True),
-    ToolSpec("send_sms", "Send an approved text message template to the caller.", SendSmsArgs,
-             send_sms, "messaging", consequential=True, dedupe=True),
-]}
+CATALOG: dict[str, ToolSpec] = {
+    t.name: t
+    for t in [
+        ToolSpec(
+            "lookup_customer",
+            "Look up the caller (or a given phone number) in the CRM. Call "
+            "this early to personalize the conversation.",
+            LookupCustomerArgs,
+            lookup_customer,
+            "crm",
+        ),
+        ToolSpec(
+            "search_contacts",
+            "Search CRM contacts by name, email or company.",
+            SearchContactsArgs,
+            search_contacts,
+            "crm",
+        ),
+        ToolSpec(
+            "create_contact",
+            "Create a CRM contact for a new caller.",
+            CreateContactArgs,
+            create_contact,
+            "crm",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "update_contact",
+            "Update the caller's CRM contact details.",
+            UpdateContactArgs,
+            update_contact,
+            "crm",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "create_lead",
+            "Record a sales lead / service request in the CRM.",
+            CreateLeadArgs,
+            create_lead,
+            "crm",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "update_lead",
+            "Update an existing lead's status or description.",
+            UpdateLeadArgs,
+            update_lead,
+            "crm",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "add_note",
+            "Attach a short note about this call to the caller's CRM record.",
+            AddNoteArgs,
+            add_note,
+            "crm",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "check_availability",
+            "List open appointment slots on a given day. Always call this before offering times.",
+            CheckAvailabilityArgs,
+            check_availability,
+            "calendar",
+        ),
+        ToolSpec(
+            "get_appointments",
+            "List the caller's own upcoming appointments.",
+            GetAppointmentsArgs,
+            get_appointments,
+            "calendar",
+        ),
+        ToolSpec(
+            "book_appointment",
+            "Book an appointment in a slot returned by check_availability. "
+            "Only call after the caller confirmed the time, name and reason.",
+            BookAppointmentArgs,
+            book_appointment,
+            "calendar",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "cancel_appointment",
+            "Cancel one of the caller's appointments.",
+            CancelAppointmentArgs,
+            cancel_appointment,
+            "calendar",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "search_knowledge_base",
+            "Search the business knowledge base for facts (services, "
+            "prices, policies). Use before answering factual questions.",
+            SearchKnowledgeArgs,
+            search_knowledge_base,
+            "knowledge",
+        ),
+        ToolSpec(
+            "transfer_to_human",
+            "Transfer the live call to a human when the caller asks for a "
+            "person, or when you cannot resolve the request.",
+            TransferArgs,
+            transfer_to_human,
+            "transfer",
+            consequential=True,
+            dedupe=True,
+        ),
+        ToolSpec(
+            "send_sms",
+            "Send an approved text message template to the caller.",
+            SendSmsArgs,
+            send_sms,
+            "messaging",
+            consequential=True,
+            dedupe=True,
+        ),
+    ]
+}

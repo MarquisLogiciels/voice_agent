@@ -74,7 +74,7 @@ def chunk_text(text: str, *, size: int = 900, overlap: int = 150) -> list[Chunk]
                     pieces.append(cur)
                     tail = cur[-overlap:] if overlap else ""
                     # start the overlap at a word boundary
-                    tail = tail[tail.find(" ") + 1:] if " " in tail else tail
+                    tail = tail[tail.find(" ") + 1 :] if " " in tail else tail
                     joined = (tail + " " + piece).strip() if tail else piece
                     cur = joined if len(joined) <= size else piece
                 else:

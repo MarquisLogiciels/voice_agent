@@ -27,17 +27,25 @@ class RecordingService:
         if s.blob_backend != "s3":
             logger.warning("recording requested but blob backend is not s3; skipping")
             return None
-        upload = api.S3Upload(bucket=s.s3_bucket, region=s.s3_region,
-                              endpoint=s.s3_endpoint_url or "",
-                              force_path_style=bool(s.s3_endpoint_url))
+        upload = api.S3Upload(
+            bucket=s.s3_bucket,
+            region=s.s3_region,
+            endpoint=s.s3_endpoint_url or "",
+            force_path_style=bool(s.s3_endpoint_url),
+        )
         if s.s3_access_key_id and s.s3_secret_access_key:
             upload.access_key = s.s3_access_key_id.get_secret_value()
             upload.secret = s.s3_secret_access_key.get_secret_value()
         req = api.RoomCompositeEgressRequest(
-            room_name=room_name, audio_only=True,
-            file_outputs=[api.EncodedFileOutput(
-                file_type=api.EncodedFileType.OGG,
-                filepath=self.object_key(tenant_id, conversation_id), s3=upload)],
+            room_name=room_name,
+            audio_only=True,
+            file_outputs=[
+                api.EncodedFileOutput(
+                    file_type=api.EncodedFileType.OGG,
+                    filepath=self.object_key(tenant_id, conversation_id),
+                    s3=upload,
+                )
+            ],
         )
         info = await self._api.egress.start_room_composite_egress(req)
         return str(info.egress_id)

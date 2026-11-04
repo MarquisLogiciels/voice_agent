@@ -23,6 +23,7 @@ from ..integrations.registry import IntegrationSet
 from ..integrations.sandbox import SandboxSuite
 from ..knowledge.chunking import chunk_text
 from ..knowledge.embeddings import HashingEmbedder
+from ..knowledge.types import KnowledgeHit
 from ..providers.builder import BuiltPipeline, PipelineBuilder
 from ..providers.registry import default_registry
 from ..runtime.recorder import MemorySink
@@ -30,7 +31,6 @@ from ..runtime.session import CallInfo, RuntimeDeps, build_runtime_session
 from ..shared.logging import get_logger
 from ..telephony.sip import SipCallError
 from ..telephony.transfer import TransferManager
-from ..tools.interfaces import KnowledgeHit
 from .scenario import Scenario
 
 logger = get_logger(__name__)
@@ -103,11 +103,23 @@ class InMemoryKnowledge:
 
     async def search(self, query: str, *, top_k: int) -> list[KnowledgeHit]:
         q = (await self._embedder.embed([query]))[0]
-        scored = sorted(((sum(a * b for a, b in zip(q, v, strict=True)), title, text)
-                         for title, text, v in self.chunks), reverse=True)[:top_k]
-        return [KnowledgeHit(content=text, document_title=title, document_id=title,
-                             chunk_id=f"{title}:{i}", score=max(0.0, s))
-                for i, (s, title, text) in enumerate(scored)]
+        scored = sorted(
+            (
+                (sum(a * b for a, b in zip(q, v, strict=True)), title, text)
+                for title, text, v in self.chunks
+            ),
+            reverse=True,
+        )[:top_k]
+        return [
+            KnowledgeHit(
+                content=text,
+                document_title=title,
+                document_id=title,
+                chunk_id=f"{title}:{i}",
+                score=max(0.0, s),
+            )
+            for i, (s, title, text) in enumerate(scored)
+        ]
 
 
 class CallerDriver:
@@ -208,31 +220,55 @@ async def run_scenario(
     managers: list[TransferManager] = []
 
     def transfer_factory(session: Any, env: Any) -> TransferManager:
-        tm = TransferManager(config=cfg.transfer, timezone=cfg.business.timezone,
-                             transport=transport, room_name="sim", caller_identity="caller",
-                             clock=lambda: now)
+        tm = TransferManager(
+            config=cfg.transfer,
+            timezone=cfg.business.timezone,
+            transport=transport,
+            room_name="sim",
+            caller_identity="caller",
+            clock=lambda: now,
+        )
         managers.append(tm)
         return tm
 
-    resolved = ResolvedVersion(tenant_id=uuid.uuid4(), agent_id=uuid.uuid4(),
-                               version_id=uuid.uuid4(), version=0, environment="simulation",
-                               config=cfg, is_canary=False)
+    resolved = ResolvedVersion(
+        tenant_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        version_id=uuid.uuid4(),
+        version=0,
+        environment="simulation",
+        config=cfg,
+        is_canary=False,
+    )
     deps = RuntimeDeps(
         builder=PipelineBuilder(default_registry()),
-        integrations=IntegrationSet(crm=suite if cfg.integrations.crm else None,
-                                    calendar=suite if cfg.integrations.calendar else None,
-                                    messaging=suite if cfg.integrations.messaging else None),
-        sink=MemorySink(), knowledge=knowledge, transfer_factory=transfer_factory,
-        clock=lambda: now, enable_policies=False,
-        pipeline_override=BuiltPipeline(mode=PipelineMode.CASCADED, llm=agent_llm,
-                                        turn_detection="manual"),
+        integrations=IntegrationSet(
+            crm=suite if cfg.integrations.crm else None,
+            calendar=suite if cfg.integrations.calendar else None,
+            messaging=suite if cfg.integrations.messaging else None,
+        ),
+        sink=MemorySink(),
+        knowledge=knowledge,
+        transfer_factory=transfer_factory,
+        clock=lambda: now,
+        enable_policies=False,
+        pipeline_override=BuiltPipeline(
+            mode=PipelineMode.CASCADED, llm=agent_llm, turn_detection="manual"
+        ),
     )
     cfg.conversation.end_call_enabled = False
-    rs = build_runtime_session(resolved, CallInfo(
-        conversation_id=f"sim-{scenario.id}-{uuid.uuid4().hex[:6]}", direction="simulation",
-        caller_number=scenario.caller_number), deps)
-    driver: CallerDriver = (ScriptedCaller(scenario) if scenario.script is not None
-                            else LLMCaller(scenario, caller_llm))
+    rs = build_runtime_session(
+        resolved,
+        CallInfo(
+            conversation_id=f"sim-{scenario.id}-{uuid.uuid4().hex[:6]}",
+            direction="simulation",
+            caller_number=scenario.caller_number,
+        ),
+        deps,
+    )
+    driver: CallerDriver = (
+        ScriptedCaller(scenario) if scenario.script is not None else LLMCaller(scenario, caller_llm)
+    )
     turns: list[TurnRecord] = []
     error: str | None = None
     try:
@@ -245,14 +281,23 @@ async def run_scenario(
                     break
                 started = time.perf_counter()
                 n_tools = len(rs.recorder.tool_events)
-                result = await asyncio.wait_for(session.run(user_input=utterance),
-                                                timeout=turn_timeout_s)
-                texts = [ev.item.text_content or "" for ev in result.events
-                         if ev.type == "message" and ev.item.role == "assistant"]
+                result: Any = await asyncio.wait_for(
+                    session.run(user_input=utterance), timeout=turn_timeout_s
+                )
+                texts = [
+                    ev.item.text_content or ""
+                    for ev in result.events
+                    if ev.type == "message" and ev.item.role == "assistant"
+                ]
                 agent_reply = " ".join(t for t in texts if t).strip()
-                turns.append(TurnRecord(user=utterance, agent=agent_reply,
-                                        latency_s=time.perf_counter() - started,
-                                        tool_calls=rs.recorder.tool_events[n_tools:]))
+                turns.append(
+                    TurnRecord(
+                        user=utterance,
+                        agent=agent_reply,
+                        latency_s=time.perf_counter() - started,
+                        tool_calls=rs.recorder.tool_events[n_tools:],
+                    )
+                )
                 if getattr(driver, "_ended", False):
                     break
                 if managers and managers[0].completed is not None and managers[0].completed.ok:
@@ -265,20 +310,34 @@ async def run_scenario(
     transfer = managers[0].completed if managers else None
     decisions = list(getattr(agent_llm, "decisions", []))
     return SimulationResult(
-        scenario=scenario, turns=turns, tool_events=list(rs.recorder.tool_events),
-        sandbox=suite, transfer_attempts=transport.calls,
-        transfer_ok=bool(transfer and transfer.ok), error=error, llm_decisions=decisions)
+        scenario=scenario,
+        turns=turns,
+        tool_events=list(rs.recorder.tool_events),
+        sandbox=suite,
+        transfer_attempts=transport.calls,
+        transfer_ok=bool(transfer and transfer.ok),
+        error=error,
+        llm_decisions=decisions,
+    )
 
 
 def tool_calls_summary(result: SimulationResult) -> list[dict[str, Any]]:
-    return [{"tool": e["tool"], "ok": e["ok"], "error": e.get("error"),
-             "args": e.get("args"), "replayed": e.get("replayed", False)}
-            for e in result.tool_events]
+    return [
+        {
+            "tool": e["tool"],
+            "ok": e["ok"],
+            "error": e.get("error"),
+            "args": e.get("args"),
+            "replayed": e.get("replayed", False),
+        }
+        for e in result.tool_events
+    ]
 
 
 def dumps(result: SimulationResult) -> str:
-    return json.dumps({"transcript": result.transcript(),
-                       "tools": tool_calls_summary(result)}, default=str)
+    return json.dumps(
+        {"transcript": result.transcript(), "tools": tool_calls_summary(result)}, default=str
+    )
 
 
 AgentLLMFactory = Callable[[AgentConfig], Any]

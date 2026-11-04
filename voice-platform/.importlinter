@@ -1,0 +1,31 @@
+[importlinter]
+root_package = voice_platform
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = Layered architecture (apps on top, shared at the bottom)
+type = layers
+layers =
+    voice_platform.apps
+    voice_platform.optimization
+    voice_platform.evaluation
+    voice_platform.runtime
+    voice_platform.telephony
+    voice_platform.tools
+    voice_platform.knowledge | voice_platform.integrations | voice_platform.providers
+    voice_platform.config
+    voice_platform.core
+    voice_platform.observability
+    voice_platform.shared
+
+[importlinter:contract:framework-isolation]
+name = Business logic (tools, integrations, config, core, knowledge) never imports LiveKit
+type = forbidden
+source_modules =
+    voice_platform.tools
+    voice_platform.integrations
+    voice_platform.config
+    voice_platform.core
+    voice_platform.knowledge
+forbidden_modules =
+    livekit

@@ -70,7 +70,9 @@ class EgressPolicy:
         if not self.allowed_hosts:
             return True
         return any(
-            fnmatch.fnmatchcase(host, pattern.lower()) if "*" in pattern else host == pattern.lower()
+            fnmatch.fnmatchcase(host, pattern.lower())
+            if "*" in pattern
+            else host == pattern.lower()
             for pattern in self.allowed_hosts
         )
 

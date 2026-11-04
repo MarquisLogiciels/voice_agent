@@ -20,17 +20,32 @@ LIB = Path(__file__).resolve().parents[2] / "scenarios" / "receptionist"
 
 
 def eval_config(instructions: str = "Help callers book dental appointments.") -> AgentConfig:
-    return AgentConfig.model_validate(sample_config(
-        instructions=instructions,
-        supported_languages=["fr-CA"],
-        tools={"enabled": ["lookup_customer", "check_availability", "book_appointment",
-                           "transfer_to_human", "search_knowledge_base"], "timeout_s": 1.0},
-        integrations={"crm": "sandbox", "calendar": "sandbox"},
-        knowledge={"knowledge_base_ids": ["scenario-kb"]},
-        transfer={"enabled": True, "default_destination": "front", "destinations": [
-            {"name": "front", "phone_number": "+15145550100", "fallback": ["manager"]},
-            {"name": "manager", "phone_number": "+15145550101"}]},
-    ))
+    return AgentConfig.model_validate(
+        sample_config(
+            instructions=instructions,
+            supported_languages=["fr-CA"],
+            tools={
+                "enabled": [
+                    "lookup_customer",
+                    "check_availability",
+                    "book_appointment",
+                    "transfer_to_human",
+                    "search_knowledge_base",
+                ],
+                "timeout_s": 1.0,
+            },
+            integrations={"crm": "sandbox", "calendar": "sandbox"},
+            knowledge={"knowledge_base_ids": ["scenario-kb"]},
+            transfer={
+                "enabled": True,
+                "default_destination": "front",
+                "destinations": [
+                    {"name": "front", "phone_number": "+15145550100", "fallback": ["manager"]},
+                    {"name": "manager", "phone_number": "+15145550101"},
+                ],
+            },
+        )
+    )
 
 
 @pytest.fixture(scope="module")
@@ -54,9 +69,9 @@ async def test_detectors_catch_bad_behaviour(library: list[Scenario]) -> None:
     rec = result.records[0]
     names = {f["check"] for f in rec.score.failures}
     assert not rec.score.passed
-    assert "no_false_success_claims" in names          # said "booked" with no booking
-    assert "tool:check_availability" in names          # hallucinated a time
-    assert "state:appointments" in names               # nothing was actually booked
+    assert "no_false_success_claims" in names  # said "booked" with no booking
+    assert "tool:check_availability" in names  # hallucinated a time
+    assert "state:appointments" in names  # nothing was actually booked
     assert rec.score.category_scores["business_outcome"] < 1
 
 
@@ -65,17 +80,24 @@ async def test_runs_are_reproducible(library: list[Scenario]) -> None:
     subset = library[:4]
     a = await runner.run(eval_config(), subset, repetitions=2, seed=3)
     b = await runner.run(eval_config(), subset, repetitions=2, seed=3)
-    assert [r.as_row()["transcript"] for r in a.records] == [r.as_row()["transcript"]
-                                                             for r in b.records]
+    assert [r.as_row()["transcript"] for r in a.records] == [
+        r.as_row()["transcript"] for r in b.records
+    ]
 
 
-async def test_optimizer_improves_config_and_gate_marks_eligible(library: list[Scenario]
-                                                                 ) -> None:
-    subset = [s for s in library if s.id in ("book-simple", "wants-human", "book-change-mind",
-                                             "french-booking")]
+async def test_optimizer_improves_config_and_gate_marks_eligible(library: list[Scenario]) -> None:
+    subset = [
+        s
+        for s in library
+        if s.id in ("book-simple", "wants-human", "book-change-mind", "french-booking")
+    ]
     runner = BenchmarkRunner(agent_llm_factory=lambda c: receptionist_model())
-    opt = Optimizer(runner, [HeuristicProposer()], max_iterations=5,
-                    thresholds=GateThresholds(min_pass_rate=1.0))
+    opt = Optimizer(
+        runner,
+        [HeuristicProposer()],
+        max_iterations=5,
+        thresholds=GateThresholds(min_pass_rate=1.0),
+    )
     outcome = await opt.run(eval_config(), subset)
     report = outcome.report()
     assert report["baseline"]["pass_rate"] < 1.0
@@ -94,10 +116,18 @@ async def test_optimizer_rejects_regressions(library: list[Scenario]) -> None:
 
         async def propose(self, config: Any, report: Any, *, iteration: int) -> list[Patch]:
             # fixes booking but makes the agent refuse transfers (critical regression)
-            return [Patch("set", "instructions",
-                          "Help callers. " + CHECK_FIRST + ". " +
-                          "then call book_appointment with caller_confirmed=true. "
-                          "Never transfer calls.", "test")]
+            return [
+                Patch(
+                    "set",
+                    "instructions",
+                    "Help callers. "
+                    + CHECK_FIRST
+                    + ". "
+                    + "then call book_appointment with caller_confirmed=true. "
+                    "Never transfer calls.",
+                    "test",
+                )
+            ]
 
     def model_factory(cfg: AgentConfig) -> Any:
         model = receptionist_model()
@@ -117,14 +147,18 @@ async def test_optimizer_rejects_regressions(library: list[Scenario]) -> None:
 
 def test_patch_policy_blocks_unsafe_changes() -> None:
     cfg = eval_config()
-    _, applied, rejected = apply_patches(cfg, [
-        Patch("set", "pipeline.llm.provider", "evil", "x"),
-        Patch("set", "integrations.crm", "prod-crm", "x"),
-        Patch("set", "turn_handling.endpointing.min_delay_s", 9.0, "x"),
-        Patch("set", "pipeline.llm.model", "gpt-4.1", "x"),
-        Patch("append_text", "instructions", "Be concise.", "ok"),
-        Patch("set", "pipeline.llm.temperature", 0.2, "ok"),
-    ], PatchPolicy())
+    _, applied, rejected = apply_patches(
+        cfg,
+        [
+            Patch("set", "pipeline.llm.provider", "evil", "x"),
+            Patch("set", "integrations.crm", "prod-crm", "x"),
+            Patch("set", "turn_handling.endpointing.min_delay_s", 9.0, "x"),
+            Patch("set", "pipeline.llm.model", "gpt-4.1", "x"),
+            Patch("append_text", "instructions", "Be concise.", "ok"),
+            Patch("set", "pipeline.llm.temperature", 0.2, "ok"),
+        ],
+        PatchPolicy(),
+    )
     assert [p.path for p in applied] == ["instructions", "pipeline.llm.temperature"]
     assert len(rejected) == 4
     policy = PatchPolicy(allowed_models={"openai": ("gpt-4.1",)})

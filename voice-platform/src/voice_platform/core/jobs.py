@@ -76,12 +76,18 @@ async def claim(
     if row is None:
         return None
     return ClaimedJob(
-        id=row.id, tenant_id=row.tenant_id, kind=row.kind, payload=row.payload,
-        attempts=row.attempts, max_attempts=row.max_attempts,
+        id=row.id,
+        tenant_id=row.tenant_id,
+        kind=row.kind,
+        payload=row.payload,
+        attempts=row.attempts,
+        max_attempts=row.max_attempts,
     )
 
 
-async def extend_lease(session: AsyncSession, job_id: uuid.UUID, worker_id: str, lease_s: int) -> None:
+async def extend_lease(
+    session: AsyncSession, job_id: uuid.UUID, worker_id: str, lease_s: int
+) -> None:
     await session.execute(
         sa.text(
             "UPDATE jobs SET locked_until = now() + make_interval(secs => :lease)"
@@ -114,8 +120,11 @@ async def fail(
         sa.update(Job)
         .where(Job.id == job.id)
         .values(
-            status=status, last_error=error[:4000], run_after=run_after,
-            locked_by=None, locked_until=None,
+            status=status,
+            last_error=error[:4000],
+            run_after=run_after,
+            locked_by=None,
+            locked_until=None,
         )
     )
     return status

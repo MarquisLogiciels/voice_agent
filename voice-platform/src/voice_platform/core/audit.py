@@ -41,6 +41,9 @@ async def record_audit(
     )
     logger.info(
         "audit",
-        extra={"audit_action": action, "resource_type": resource_type,
-               "resource_id": str(resource_id) if resource_id else None},
+        extra={
+            "audit_action": action,
+            "resource_type": resource_type,
+            "resource_id": str(resource_id) if resource_id else None,
+        },
     )

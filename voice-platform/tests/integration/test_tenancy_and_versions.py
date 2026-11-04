@@ -23,12 +23,14 @@ from voice_platform.shared.logging import redact_text
 async def _make_agent(db: Any, tenant_id: uuid.UUID, slug: str = "front-desk") -> tuple[Any, Any]:
     async with db.session(DbScope.for_tenant(tenant_id)) as s:
         svc = AgentService(s, tenant_id, None)
-        return await svc.create_agent(slug=slug, name="Front", description="",
-                                      config=sample_config())
+        return await svc.create_agent(
+            slug=slug, name="Front", description="", config=sample_config()
+        )
 
 
-async def test_rls_hides_other_tenants_even_without_where(db: Any, tenant: Any,
-                                                          other_tenant: Any) -> None:
+async def test_rls_hides_other_tenants_even_without_where(
+    db: Any, tenant: Any, other_tenant: Any
+) -> None:
     await _make_agent(db, tenant.id)
     await _make_agent(db, other_tenant.id)
     async with db.session(DbScope.for_tenant(tenant.id)) as s:
@@ -49,15 +51,16 @@ async def test_no_tenant_context_sees_nothing(db: Any, tenant: Any) -> None:
     await _make_agent(db, tenant.id, slug="hidden")
     async with db.session(DbScope()) as s:
         for table in TENANT_TABLES:
-            n = await s.scalar(sa.text(f"select count(*) from {table}"))
+            n = await s.scalar(sa.text(f"select count(*) from {table}"))  # noqa: S608 - fixed names
             assert n == 0, table
 
 
 async def test_cross_tenant_update_is_noop(db: Any, tenant: Any, other_tenant: Any) -> None:
     agent, _ = await _make_agent(db, other_tenant.id, slug="victim")
     async with db.session(DbScope.for_tenant(tenant.id)) as s:
-        res = await s.execute(sa.text("update agents set name='pwned' where id=:i"),
-                              {"i": agent.id})
+        res = await s.execute(
+            sa.text("update agents set name='pwned' where id=:i"), {"i": agent.id}
+        )
         assert res.rowcount == 0
     async with db.session(DbScope.for_tenant(other_tenant.id)) as s:
         assert await s.scalar(sa.select(AgentRow.name).where(AgentRow.id == agent.id)) == "Front"
@@ -83,8 +86,9 @@ async def test_version_lifecycle_publish_deploy_canary_rollback(db: Any, tenant:
         await svc.deploy(agent.id, "prod", v1.id)
         with pytest.raises(ConflictError):
             await svc.update_draft(v1.id, sample_config(), None)  # published is immutable
-        v2 = await svc.create_draft(agent.id, sample_config(instructions="v2 instructions"),
-                                    parent_version_id=v1.id)
+        v2 = await svc.create_draft(
+            agent.id, sample_config(instructions="v2 instructions"), parent_version_id=v1.id
+        )
         assert v2.version == 2
         await svc.publish(v2.id)
         await svc.set_canary(agent.id, "prod", v2.id, 30)
@@ -130,13 +134,23 @@ async def test_resolve_unknown_environment(db: Any, tenant: Any) -> None:
 async def test_credentials_encrypted_and_isolated(db: Any, tenant: Any, other_tenant: Any) -> None:
     vault = CredentialVault(CredentialCipher([generate_fernet_key()]))
     async with db.session(DbScope.for_tenant(tenant.id)) as s:
-        cred = await vault.create(s, tenant_id=tenant.id, name="hubspot-main", kind="hubspot",
-                                  payload={"access_token": "pat-na1-very-secret-token"})
+        cred = await vault.create(
+            s,
+            tenant_id=tenant.id,
+            name="hubspot-main",
+            kind="hubspot",
+            payload={"access_token": "pat-na1-very-secret-token"},
+        )
         raw = await s.scalar(sa.select(Credential.ciphertext).where(Credential.id == cred.id))
         assert b"very-secret" not in raw
         with pytest.raises(ValidationFailedError):
-            await vault.create(s, tenant_id=tenant.id, name="bad", kind="twilio",
-                               payload={"account_sid": "nope", "auth_token": "x"})
+            await vault.create(
+                s,
+                tenant_id=tenant.id,
+                name="bad",
+                kind="twilio",
+                payload={"account_sid": "nope", "auth_token": "x"},
+            )
     async with db.session(DbScope.for_tenant(other_tenant.id)) as s:
         with pytest.raises(NotFoundError):
             await vault.resolve(s, tenant_id=other_tenant.id, credential_id=cred.id)
@@ -150,8 +164,9 @@ async def test_credentials_encrypted_and_isolated(db: Any, tenant: Any, other_te
 async def test_job_queue_claim_retry_and_lease_expiry(db: Any, tenant: Any) -> None:
     kind = f"test-{uuid.uuid4().hex[:6]}"
     async with db.session(DbScope.for_tenant(tenant.id)) as s:
-        job_id = await jobs.enqueue(s, kind=kind, payload={"x": 1}, tenant_id=tenant.id,
-                                    max_attempts=2)
+        job_id = await jobs.enqueue(
+            s, kind=kind, payload={"x": 1}, tenant_id=tenant.id, max_attempts=2
+        )
     async with db.session(DbScope.system()) as s:
         claimed = await jobs.claim(s, worker_id="w1", kinds=[kind], lease_s=60)
         assert claimed and claimed.id == job_id and claimed.attempts == 1
@@ -165,8 +180,11 @@ async def test_job_queue_claim_retry_and_lease_expiry(db: Any, tenant: Any) -> N
         again = await jobs.claim(s, worker_id="w2", kinds=[kind], lease_s=1)
         assert again and again.attempts == 2
         # simulate a crashed worker: lease expires and the job is reclaimable
-        await s.execute(sa.update(Job).where(Job.id == job_id)
-                        .values(locked_until=sa.func.now() - sa.text("interval '1 second'")))
+        await s.execute(
+            sa.update(Job)
+            .where(Job.id == job_id)
+            .values(locked_until=sa.func.now() - sa.text("interval '1 second'"))
+        )
     async with db.session(DbScope.system()) as s:
         third = await jobs.claim(s, worker_id="w3", kinds=[kind])
         assert third and third.attempts == 3

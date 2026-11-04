@@ -20,8 +20,8 @@ import sqlalchemy as sa
 from ..core.db import Database, DbScope
 from ..core.models import Conversation, ConversationEvent
 from ..observability import metrics as m
-from ..observability.cost import Usage, estimate_cost
 from ..observability.stats import summarize
+from ..providers.cost import Usage, estimate_cost
 from ..shared.logging import get_logger
 
 logger = get_logger(__name__)
@@ -52,22 +52,35 @@ class PostgresSink:
 
     async def write(self, events: list[dict[str, Any]]) -> None:
         async with self._db.session(DbScope.for_tenant(self._tenant)) as s:
-            s.add_all([
-                ConversationEvent(tenant_id=self._tenant, conversation_id=self._conv,
-                                  seq=e["seq"], type=e["type"],
-                                  payload={k: v for k, v in e.items() if k not in ("seq", "type")})
-                for e in events
-            ])
+            s.add_all(
+                [
+                    ConversationEvent(
+                        tenant_id=self._tenant,
+                        conversation_id=self._conv,
+                        seq=e["seq"],
+                        type=e["type"],
+                        payload={k: v for k, v in e.items() if k not in ("seq", "type")},
+                    )
+                    for e in events
+                ]
+            )
 
     async def finalize(self, fields: dict[str, Any]) -> None:
         async with self._db.session(DbScope.for_tenant(self._tenant)) as s:
-            await s.execute(sa.update(Conversation).where(Conversation.id == self._conv)
-                            .values(**fields))
+            await s.execute(
+                sa.update(Conversation).where(Conversation.id == self._conv).values(**fields)
+            )
 
 
 class CallRecorder:
-    def __init__(self, sink: ConversationSink, *, agent_label: str,
-                 providers: dict[str, list[str]], max_buffer: int = 5000) -> None:
+    def __init__(
+        self,
+        sink: ConversationSink,
+        *,
+        agent_label: str,
+        providers: dict[str, list[str]],
+        max_buffer: int = 5000,
+    ) -> None:
         self.sink = sink
         self.agent_label = agent_label
         self.providers = providers
@@ -84,8 +97,13 @@ class CallRecorder:
         self.errors: list[dict[str, Any]] = []
         self.interruptions = 0
         self._pending_eou: float | None = None
-        self.latencies: dict[str, list[float]] = {"eou": [], "stt": [], "llm_ttft": [],
-                                                  "tts_ttfb": [], "e2e": []}
+        self.latencies: dict[str, list[float]] = {
+            "eou": [],
+            "stt": [],
+            "llm_ttft": [],
+            "tts_ttfb": [],
+            "e2e": [],
+        }
 
     # --- wiring -----------------------------------------------------------------------------
     def attach(self, session: Any) -> None:
@@ -123,8 +141,12 @@ class CallRecorder:
         if getattr(item, "type", None) != "message" or item.role not in ("user", "assistant"):
             return
         text = item.text_content or ""
-        entry = {"role": item.role, "text": text, "interrupted": bool(item.interrupted),
-                 "ts": ev.created_at}
+        entry = {
+            "role": item.role,
+            "text": text,
+            "interrupted": bool(item.interrupted),
+            "ts": ev.created_at,
+        }
         self.transcript.append(entry)
         if item.interrupted:
             self.interruptions += 1
@@ -133,8 +155,14 @@ class CallRecorder:
 
     def _on_tools(self, ev: Any) -> None:
         for call, out in ev.zipped():
-            self.add({"type": "llm_tool_call", "name": call.name, "call_id": call.call_id,
-                      "is_error": bool(out.is_error) if out is not None else None})
+            self.add(
+                {
+                    "type": "llm_tool_call",
+                    "name": call.name,
+                    "call_id": call.call_id,
+                    "is_error": bool(out.is_error) if out is not None else None,
+                }
+            )
 
     def _on_user_state(self, ev: Any) -> None:
         if ev.new_state == "away":
@@ -142,18 +170,22 @@ class CallRecorder:
 
     def _on_error(self, ev: Any) -> None:
         err = ev.error
-        info = {"type": "error", "source": type(ev.source).__name__ if ev.source else None,
-                "recoverable": bool(getattr(err, "recoverable", False)),
-                "error": str(getattr(err, "error", err))[:500]}
+        info = {
+            "type": "error",
+            "source": type(ev.source).__name__ if ev.source else None,
+            "recoverable": bool(getattr(err, "recoverable", False)),
+            "error": str(getattr(err, "error", err))[:500],
+        }
         self.errors.append(info)
         self.add(info)
         kind = getattr(err, "type", "unknown").split("_")[0]
-        m.PROVIDER_ERRORS.labels(kind, getattr(err, "label", "unknown"),
-                                 str(info["recoverable"]).lower()).inc()
+        m.PROVIDER_ERRORS.labels(
+            kind, getattr(err, "label", "unknown"), str(info["recoverable"]).lower()
+        ).inc()
 
     def _label(self, kind: str) -> tuple[str, str]:
         keys = self.providers.get(kind) or [f"{kind}:unknown:-"]
-        _, provider, model = (keys[0].split(":") + ["-", "-"])[:3]
+        _, provider, model = [*keys[0].split(":"), "-", "-"][:3]
         return provider, model
 
     def _on_turn_metrics(self, role: str, mt: dict[str, Any]) -> None:
@@ -180,8 +212,9 @@ class CallRecorder:
             e2e = eou + ttft + ttfb
             self.latencies["e2e"].append(e2e)
             m.E2E_LATENCY.labels(self.agent_label).observe(e2e)
-            self.add({"type": "turn_latency", "eou": eou, "llm_ttft": ttft, "tts_ttfb": ttfb,
-                      "e2e": e2e})
+            self.add(
+                {"type": "turn_latency", "eou": eou, "llm_ttft": ttft, "tts_ttfb": ttfb, "e2e": e2e}
+            )
             self._pending_eou = None
 
     def _match_key(self, kind: str, provider: str, model: str) -> str:
@@ -199,8 +232,9 @@ class CallRecorder:
         for mu in getattr(ev.usage, "model_usage", []):
             t = getattr(mu, "type", "")
             if t == "llm_usage":
-                usage.add_llm(self._match_key("llm", mu.provider, mu.model),
-                              mu.input_tokens, mu.output_tokens)
+                usage.add_llm(
+                    self._match_key("llm", mu.provider, mu.model), mu.input_tokens, mu.output_tokens
+                )
             elif t == "tts_usage":
                 usage.add_tts(self._match_key("tts", mu.provider, mu.model), mu.characters_count)
             elif t == "stt_usage":
@@ -229,8 +263,11 @@ class CallRecorder:
         try:
             await self.sink.write(batch)
         except Exception:
-            logger.warning("conversation event flush failed; will retry",
-                           extra={"pending": len(batch)}, exc_info=True)
+            logger.warning(
+                "conversation event flush failed; will retry",
+                extra={"pending": len(batch)},
+                exc_info=True,
+            )
             return False
         for _ in batch:
             self._queue.popleft()
@@ -257,12 +294,18 @@ class CallRecorder:
                 await asyncio.wait_for(self._flusher, timeout=10)
             except (TimeoutError, asyncio.CancelledError):
                 self._flusher.cancel()
-                logger.error("conversation events could not be fully flushed",
-                             extra={"pending": len(self._queue)})
+                logger.error(
+                    "conversation events could not be fully flushed",
+                    extra={"pending": len(self._queue)},
+                )
         summary = self.metrics_summary()
-        fields = {"metrics": summary, "cost": estimate_cost(self.usage),
-                  "ended_at": datetime.now(UTC),
-                  "duration_s": round(time.time() - self.started_at, 2), **final_fields}
+        fields = {
+            "metrics": summary,
+            "cost": estimate_cost(self.usage),
+            "ended_at": datetime.now(UTC),
+            "duration_s": round(time.time() - self.started_at, 2),
+            **final_fields,
+        }
         for attempt in range(3):
             try:
                 await self.sink.finalize(fields)

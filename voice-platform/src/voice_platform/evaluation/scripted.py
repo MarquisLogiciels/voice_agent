@@ -17,7 +17,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from livekit.agents import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions, llm
-from livekit.agents.llm import ChatChunk, ChatContext, ChoiceDelta, FunctionToolCall
+from livekit.agents.llm import (
+    ChatChunk,
+    ChatContext,
+    ChatMessage,
+    ChoiceDelta,
+    FunctionCallOutput,
+    FunctionToolCall,
+)
 
 _ids = itertools.count(1)
 
@@ -75,9 +82,15 @@ def after_tool(tool: str, reply: Callable[[dict[str, Any], Turn], Reply] | Reply
     return Rule(decide, f"tool:{tool}")
 
 
-class ScriptedLLM(llm.LLM):
-    def __init__(self, rules: list[Rule], *, fallback: str = "Could you say that again?",
-                 ttft_s: float = 0.0, model: str = "scripted") -> None:
+class ScriptedLLM(llm.LLM[Any]):
+    def __init__(
+        self,
+        rules: list[Rule],
+        *,
+        fallback: str = "Could you say that again?",
+        ttft_s: float = 0.0,
+        model: str = "scripted",
+    ) -> None:
         super().__init__()
         self.rules = rules
         self.fallback = fallback
@@ -93,21 +106,29 @@ class ScriptedLLM(llm.LLM):
     def provider(self) -> str:
         return "scripted"
 
-    def chat(self, *, chat_ctx: ChatContext, tools: list[Any] | None = None,
-             conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS, **_: Any
-             ) -> llm.LLMStream:
-        return _ScriptedStream(self, chat_ctx=chat_ctx, tools=tools or [],
-                               conn_options=conn_options)
+    def chat(
+        self,
+        *,
+        chat_ctx: ChatContext,
+        tools: list[Any] | None = None,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        **_: Any,
+    ) -> llm.LLMStream:
+        return _ScriptedStream(
+            self, chat_ctx=chat_ctx, tools=tools or [], conn_options=conn_options
+        )
 
     def decide(self, chat_ctx: ChatContext, tool_names: list[str]) -> Reply:
         items = chat_ctx.items
         instructions = "\n".join(
-            i.text_content or "" for i in items
-            if getattr(i, "type", None) == "message" and i.role in ("system", "developer"))
+            i.text_content or ""
+            for i in items
+            if isinstance(i, ChatMessage) and i.role in ("system", "developer")
+        )
         last = items[-1] if items else None
         user_text = tool_name = None
         tool_output: dict[str, Any] | None = None
-        if last is not None and last.type == "function_call_output":
+        if isinstance(last, FunctionCallOutput):
             tool_name = last.name
             try:
                 tool_output = json.loads(last.output)
@@ -115,11 +136,17 @@ class ScriptedLLM(llm.LLM):
                 tool_output = {"raw": last.output}
         else:
             for it in reversed(items):
-                if it.type == "message" and it.role == "user":
+                if isinstance(it, ChatMessage) and it.role == "user":
                     user_text = it.text_content or ""
                     break
-        turn = Turn(user_text=user_text, tool_name=tool_name, tool_output=tool_output,
-                    instructions=instructions, history=list(items), tools=tool_names)
+        turn = Turn(
+            user_text=user_text,
+            tool_name=tool_name,
+            tool_output=tool_output,
+            instructions=instructions,
+            history=list(items),
+            tools=tool_names,
+        )
         for rule in self.rules:
             reply = rule.decide(turn)
             if reply is not None:
@@ -135,17 +162,23 @@ class _ScriptedStream(llm.LLMStream):
         self._scripted = scripted
 
     async def _run(self) -> None:
-        names = [getattr(t, "info", None) and t.info.name for t in self._tools]
+        names = [getattr(getattr(t, "info", None), "name", None) for t in self._tools]
         reply = self._scripted.decide(self.chat_ctx, [n for n in names if n])
         if self._scripted.ttft_s:
             await asyncio.sleep(self._scripted.ttft_s)
         rid = f"scripted-{next(_ids)}"
         if reply.text:
             for i in range(0, len(reply.text), 24):
-                self._event_ch.send_nowait(ChatChunk(id=rid, delta=ChoiceDelta(
-                    role="assistant", content=reply.text[i:i + 24])))
+                self._event_ch.send_nowait(
+                    ChatChunk(
+                        id=rid, delta=ChoiceDelta(role="assistant", content=reply.text[i : i + 24])
+                    )
+                )
         if reply.tool_calls:
-            calls = [FunctionToolCall(name=n, arguments=json.dumps(a),
-                                      call_id=f"call_{next(_ids)}") for n, a in reply.tool_calls]
-            self._event_ch.send_nowait(ChatChunk(id=rid, delta=ChoiceDelta(
-                role="assistant", tool_calls=calls)))
+            calls = [
+                FunctionToolCall(name=n, arguments=json.dumps(a), call_id=f"call_{next(_ids)}")
+                for n, a in reply.tool_calls
+            ]
+            self._event_ch.send_nowait(
+                ChatChunk(id=rid, delta=ChoiceDelta(role="assistant", tool_calls=calls))
+            )

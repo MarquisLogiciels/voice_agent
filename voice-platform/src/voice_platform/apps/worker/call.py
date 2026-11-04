@@ -13,11 +13,13 @@ from livekit import rtc
 from livekit.agents import JobContext
 from livekit.agents.voice import room_io
 
-from ..services import Services
 from ...config.schema import TransferDestination
 from ...knowledge.service import TenantKnowledge
 from ...observability import metrics as m
 from ...providers.types import BuildContext
+from ...runtime.conversations import mark_call, open_call
+from ...runtime.recorder import PostgresSink
+from ...runtime.session import CallInfo, RuntimeDeps, RuntimeSession, build_runtime_session
 from ...shared.logging import bind_log_context, get_logger, mask_phone
 from ...telephony.outbound import DispatchMetadata
 from ...telephony.recording import RecordingService
@@ -25,9 +27,7 @@ from ...telephony.routing import ATTR_CALLER_NUMBER, ATTR_TRUNK_NUMBER, route_in
 from ...telephony.sip import LiveKitTransport, SipCallError
 from ...telephony.transfer import TransferManager
 from ...tools.ledger import PostgresLedger
-from ...runtime.conversations import mark_call, open_call
-from ...runtime.recorder import PostgresSink
-from ...runtime.session import CallInfo, RuntimeDeps, RuntimeSession, build_runtime_session
+from ..services import Services
 
 logger = get_logger(__name__)
 
@@ -77,11 +77,17 @@ class CallHandler:
             await self._hangup("unrouted")
             return
         self.tenant_id = route.tenant_id
-        await self._start(tenant_id=route.tenant_id, agent_id=route.agent_id,
-                          environment=route.environment, direction="inbound",
-                          caller=caller, business=route.dialed_number,
-                          caller_identity=participant.identity, conversation_id=None,
-                          caller_context=None)
+        await self._start(
+            tenant_id=route.tenant_id,
+            agent_id=route.agent_id,
+            environment=route.environment,
+            direction="inbound",
+            caller=caller,
+            business=route.dialed_number,
+            caller_identity=participant.identity,
+            conversation_id=None,
+            caller_context=None,
+        )
 
     # --- outbound ----------------------------------------------------------------------------
     async def _outbound(self, meta: DispatchMetadata) -> None:
@@ -93,57 +99,102 @@ class CallHandler:
         settings = self.services.settings
         if settings.telephony_dry_run:
             logger.info("dry-run: outbound dial skipped", extra={"to": mask_phone(meta.to)})
-            await mark_call(self.services.db, tenant_id, conv_id, status="failed",
-                            end_reason="dry_run")
+            await mark_call(
+                self.services.db, tenant_id, conv_id, status="failed", end_reason="dry_run"
+            )
             m.OUTBOUND_DIALS.labels("dry_run").inc()
             self.ctx.shutdown("dry run")
             return
-        await mark_call(self.services.db, tenant_id, conv_id, status="ringing",
-                        room_name=self.ctx.room.name)
+        await mark_call(
+            self.services.db, tenant_id, conv_id, status="ringing", room_name=self.ctx.room.name
+        )
         try:
-            await transport.dial(room_name=self.ctx.room.name, to_number=meta.to,
-                                 trunk_id=meta.trunk_id, from_number=meta.from_number,
-                                 participant_identity=identity, ringing_timeout_s=30)
+            await transport.dial(
+                room_name=self.ctx.room.name,
+                to_number=meta.to,
+                trunk_id=meta.trunk_id,
+                from_number=meta.from_number,
+                participant_identity=identity,
+                ringing_timeout_s=30,
+            )
         except SipCallError as e:
             status = {"busy": "busy", "no_answer": "no_answer"}.get(e.status, "failed")
-            await mark_call(self.services.db, tenant_id, conv_id, status=status,
-                            end_reason=f"dial_{e.status}")
+            await mark_call(
+                self.services.db, tenant_id, conv_id, status=status, end_reason=f"dial_{e.status}"
+            )
             m.OUTBOUND_DIALS.labels(e.status).inc()
             self.ctx.shutdown(f"dial failed: {e.status}")
             return
         m.OUTBOUND_DIALS.labels("answered").inc()
         context = meta.purpose + (f" Details: {meta.context}" if meta.context else "")
-        await self._start(tenant_id=tenant_id, agent_id=uuid.UUID(meta.agent_id),
-                          environment=meta.environment, direction="outbound", caller=meta.to,
-                          business=meta.from_number, caller_identity=identity,
-                          conversation_id=conv_id, caller_context=context or None)
+        await self._start(
+            tenant_id=tenant_id,
+            agent_id=uuid.UUID(meta.agent_id),
+            environment=meta.environment,
+            direction="outbound",
+            caller=meta.to,
+            business=meta.from_number,
+            caller_identity=identity,
+            conversation_id=conv_id,
+            caller_context=context or None,
+        )
 
     # --- shared start ------------------------------------------------------------------------
-    async def _start(self, *, tenant_id: uuid.UUID, agent_id: uuid.UUID, environment: str,
-                     direction: str, caller: str | None, business: str | None,
-                     caller_identity: str, conversation_id: uuid.UUID | None,
-                     caller_context: str | None) -> None:
+    async def _start(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        environment: str,
+        direction: str,
+        caller: str | None,
+        business: str | None,
+        caller_identity: str,
+        conversation_id: uuid.UUID | None,
+        caller_context: str | None,
+    ) -> None:
         svc = self.services
         ctx = self.ctx
         opened = await open_call(
-            svc.db, svc.vault, tenant_id=tenant_id, agent_id=agent_id, environment=environment,
-            direction=direction, room_name=ctx.room.name, job_id=ctx.job.id,
-            caller_number=caller, callee_number=business, conversation_id=conversation_id)
+            svc.db,
+            svc.vault,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            environment=environment,
+            direction=direction,
+            room_name=ctx.room.name,
+            job_id=ctx.job.id,
+            caller_number=caller,
+            callee_number=business,
+            conversation_id=conversation_id,
+        )
         self.conversation_id = opened.conversation_id
         cfg = opened.resolved.config
-        bind_log_context(tenant_id=str(tenant_id), agent_id=str(agent_id),
-                         conversation_id=str(opened.conversation_id),
-                         agent_version=opened.resolved.version, room=ctx.room.name)
+        bind_log_context(
+            tenant_id=str(tenant_id),
+            agent_id=str(agent_id),
+            conversation_id=str(opened.conversation_id),
+            agent_version=opened.resolved.version,
+            room=ctx.room.name,
+        )
         async with svc.db.session(_scope(tenant_id)) as s:
             integrations = await svc.resolver.resolve_set(
-                s, tenant_id, crm=cfg.integrations.crm, calendar=cfg.integrations.calendar,
-                messaging=cfg.integrations.messaging, custom=cfg.integrations.custom,
-                timezone=cfg.business.timezone)
+                s,
+                tenant_id,
+                crm=cfg.integrations.crm,
+                calendar=cfg.integrations.calendar,
+                messaging=cfg.integrations.messaging,
+                custom=cfg.integrations.custom,
+                timezone=cfg.business.timezone,
+            )
         knowledge = None
         if cfg.knowledge.knowledge_base_ids:
-            knowledge = TenantKnowledge(svc.knowledge, tenant_id,
-                                        [uuid.UUID(k) for k in cfg.knowledge.knowledge_base_ids],
-                                        mode=cfg.knowledge.retrieval)
+            knowledge = TenantKnowledge(
+                svc.knowledge,
+                tenant_id,
+                [uuid.UUID(k) for k in cfg.knowledge.knowledge_base_ids],
+                mode=cfg.knowledge.retrieval,
+            )
         transport = LiveKitTransport(ctx.api)
         rs_ref: dict[str, RuntimeSession] = {}
 
@@ -157,11 +208,15 @@ class CallHandler:
 
             trunk = cfg.transfer.outbound_trunk_id or os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK")
             task = WarmTransferTask(
-                sip_call_to=dest.phone_number or dest.sip_uri or "", sip_trunk_id=trunk,
+                sip_call_to=dest.phone_number or dest.sip_uri or "",
+                sip_trunk_id=trunk,
                 sip_number=cfg.transfer.caller_id_number or business or "",
-                chat_ctx=rs_ref["rs"].agent.chat_ctx, ringing_timeout=dest.ringing_timeout_s,
-                instructions=WorkflowInstructions(extra=f"Handoff summary for the staff "
-                                                  f"member: {summary}"))
+                chat_ctx=rs_ref["rs"].agent.chat_ctx,
+                ringing_timeout=dest.ringing_timeout_s,
+                instructions=WorkflowInstructions(
+                    extra=f"Handoff summary for the staff member: {summary}"
+                ),
+            )
             await task
 
         async def transfer_event(ev: dict[str, Any]) -> None:
@@ -169,41 +224,73 @@ class CallHandler:
 
         def transfer_factory(session: Any, env: Any) -> TransferManager:
             return TransferManager(
-                config=cfg.transfer, timezone=cfg.business.timezone, transport=transport,
-                room_name=ctx.room.name, caller_identity=caller_identity, announce=announce,
-                warm_runner=warm, dry_run=svc.settings.telephony_dry_run,
-                allowed_prefixes=svc.settings.outbound_allowed_prefixes, on_event=transfer_event)
+                config=cfg.transfer,
+                timezone=cfg.business.timezone,
+                transport=transport,
+                room_name=ctx.room.name,
+                caller_identity=caller_identity,
+                announce=announce,
+                warm_runner=warm,
+                dry_run=svc.settings.telephony_dry_run,
+                allowed_prefixes=svc.settings.outbound_allowed_prefixes,
+                on_event=transfer_event,
+            )
 
         def end_call_tool() -> Any:
             from livekit.agents.beta.tools import EndCallTool
 
-            return EndCallTool(delete_room=True, ignore_on_enter=True,
-                               end_instructions="Say a brief, polite goodbye.")
+            return EndCallTool(
+                delete_room=True,
+                ignore_on_enter=True,
+                end_instructions="Say a brief, polite goodbye.",
+            )
 
         async def end_call(reason: str) -> None:
             self.close_reason = self.close_reason or reason
             await self._hangup(reason)
 
         deps = RuntimeDeps(
-            builder=svc.builder, integrations=integrations,
-            build_ctx=BuildContext(tenant_secrets=opened.provider_secrets,
-                                   default_language=cfg.language, vad=self.vad),
-            ledger=PostgresLedger(svc.db, tenant_id=tenant_id,
-                                  conversation_id=opened.conversation_id, agent_id=agent_id),
+            builder=svc.builder,
+            integrations=integrations,
+            build_ctx=BuildContext(
+                tenant_secrets=opened.provider_secrets, default_language=cfg.language, vad=self.vad
+            ),
+            ledger=PostgresLedger(
+                svc.db,
+                tenant_id=tenant_id,
+                conversation_id=opened.conversation_id,
+                agent_id=agent_id,
+            ),
             sink=PostgresSink(svc.db, tenant_id, opened.conversation_id),
-            knowledge=knowledge, transfer_factory=transfer_factory, end_call=end_call,
+            knowledge=knowledge,
+            transfer_factory=transfer_factory,
+            end_call=end_call,
             end_call_tool_factory=end_call_tool,
         )
         try:
-            rs = build_runtime_session(opened.resolved, CallInfo(
-                conversation_id=str(opened.conversation_id), direction=direction,
-                caller_number=caller, business_number=business, room_name=ctx.room.name,
-                caller_identity=caller_identity, caller_context=caller_context), deps)
+            rs = build_runtime_session(
+                opened.resolved,
+                CallInfo(
+                    conversation_id=str(opened.conversation_id),
+                    direction=direction,
+                    caller_number=caller,
+                    business_number=business,
+                    room_name=ctx.room.name,
+                    caller_identity=caller_identity,
+                    caller_context=caller_context,
+                ),
+                deps,
+            )
         except Exception:
             await integrations.aclose()
             logger.exception("failed to build agent session")
-            await mark_call(svc.db, tenant_id, opened.conversation_id, status="failed",
-                            end_reason="session_build_failed")
+            await mark_call(
+                svc.db,
+                tenant_id,
+                opened.conversation_id,
+                status="failed",
+                end_reason="session_build_failed",
+            )
             await self._hangup("session_build_failed")
             return
         rs_ref["rs"] = rs
@@ -214,9 +301,12 @@ class CallHandler:
             # announced before recording starts; the greeting follows
             rs.session.say(cfg.recording.consent_announcement, allow_interruptions=False)
         await rs.session.start(
-            agent=rs.agent, room=ctx.room,
-            room_options=room_io.RoomOptions(participant_identity=caller_identity,
-                                             close_on_disconnect=True))
+            agent=rs.agent,
+            room=ctx.room,
+            room_options=room_io.RoomOptions(
+                participant_identity=caller_identity, close_on_disconnect=True
+            ),
+        )
         rs.start_policies()
         if cfg.recording.enabled:
             await self._start_recording(tenant_id, opened.conversation_id)
@@ -224,13 +314,17 @@ class CallHandler:
     async def _start_recording(self, tenant_id: uuid.UUID, conv_id: uuid.UUID) -> None:
         try:
             rec = RecordingService(self.ctx.api, self.services.settings)
-            self.egress_id = await rec.start(room_name=self.ctx.room.name, tenant_id=tenant_id,
-                                             conversation_id=conv_id)
-            await mark_call(self.services.db, tenant_id, conv_id,
-                            recording_status="recording" if self.egress_id else "unavailable",
-                            recording_uri=rec.object_key(tenant_id, conv_id)
-                            if self.egress_id else None,
-                            recording_consent=True)
+            self.egress_id = await rec.start(
+                room_name=self.ctx.room.name, tenant_id=tenant_id, conversation_id=conv_id
+            )
+            await mark_call(
+                self.services.db,
+                tenant_id,
+                conv_id,
+                recording_status="recording" if self.egress_id else "unavailable",
+                recording_uri=rec.object_key(tenant_id, conv_id) if self.egress_id else None,
+                recording_consent=True,
+            )
         except Exception:
             logger.exception("failed to start recording")
             await mark_call(self.services.db, tenant_id, conv_id, recording_status="failed")
@@ -276,10 +370,14 @@ async def _post_call_summary(rs: RuntimeSession) -> str | None:
     if not isinstance(model, lk_llm.LLM):
         return None
     ctx = lk_llm.ChatContext()
-    ctx.add_message(role="system", content="Summarize this phone call in 2-3 sentences for a "
-                    "business owner: who called, what they wanted, and the outcome.")
+    ctx.add_message(
+        role="system",
+        content="Summarize this phone call in 2-3 sentences for a "
+        "business owner: who called, what they wanted, and the outcome.",
+    )
     ctx.add_message(role="user", content="\n".join(lines)[-12_000:])
     try:
+
         async def run() -> str:
             out: list[str] = []
             async with model.chat(chat_ctx=ctx) as stream:

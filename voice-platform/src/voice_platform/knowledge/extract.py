@@ -22,9 +22,16 @@ SUPPORTED_TYPES = {
 }
 
 _DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-_EXT = {".pdf": "application/pdf", ".docx": _DOCX,
-        ".html": "text/html", ".htm": "text/html", ".txt": "text/plain", ".md": "text/markdown",
-        ".csv": "text/csv", ".json": "application/json"}
+_EXT = {
+    ".pdf": "application/pdf",
+    ".docx": _DOCX,
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".csv": "text/csv",
+    ".json": "application/json",
+}
 
 
 def sniff_mime(filename: str, declared: str | None, data: bytes) -> str:
@@ -37,8 +44,9 @@ def sniff_mime(filename: str, declared: str | None, data: bytes) -> str:
     for ext, mime in _EXT.items():
         if filename.lower().endswith(ext):
             return mime
-    raise ValidationFailedError("unsupported document type",
-                                details={"supported": sorted(SUPPORTED_TYPES)})
+    raise ValidationFailedError(
+        "unsupported document type", details={"supported": sorted(SUPPORTED_TYPES)}
+    )
 
 
 def _clean(text: str) -> str:

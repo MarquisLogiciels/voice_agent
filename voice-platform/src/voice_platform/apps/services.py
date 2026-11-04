@@ -34,8 +34,9 @@ class Services:
     redis: Any | None = None
 
     @classmethod
-    def from_settings(cls, settings: Settings | None = None, *, db: Database | None = None
-                      ) -> Services:
+    def from_settings(
+        cls, settings: Settings | None = None, *, db: Database | None = None
+    ) -> Services:
         settings = settings or get_settings()
         keys = settings.encryption_keys.get_secret_value()
         if not keys and settings.environment in (Environment.DEV, Environment.TEST):
@@ -51,14 +52,25 @@ class Services:
         if settings.redis_url is not None:
             import redis.asyncio as aioredis
 
-            redis = aioredis.from_url(settings.redis_url.get_secret_value(),
-                                      socket_timeout=0.5, socket_connect_timeout=0.5)
+            redis = aioredis.from_url(
+                settings.redis_url.get_secret_value(),
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+            )
         return cls(
-            settings=settings, db=database, vault=vault,
-            resolver=IntegrationResolver(vault, timeout_s=settings.integration_default_timeout_s,
-                                         allow_insecure=settings.allow_insecure_http_integrations),
-            registry=registry, builder=PipelineBuilder(registry), blobs=blobs,
-            knowledge=KnowledgeService(database, blobs), rate_limiter=RateLimiter(redis),
+            settings=settings,
+            db=database,
+            vault=vault,
+            resolver=IntegrationResolver(
+                vault,
+                timeout_s=settings.integration_default_timeout_s,
+                allow_insecure=settings.allow_insecure_http_integrations,
+            ),
+            registry=registry,
+            builder=PipelineBuilder(registry),
+            blobs=blobs,
+            knowledge=KnowledgeService(database, blobs),
+            rate_limiter=RateLimiter(redis),
             redis=redis,
         )
 
