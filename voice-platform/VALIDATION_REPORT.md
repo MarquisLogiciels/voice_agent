@@ -129,3 +129,89 @@ of the tool call and the answer takes ~5 s each; on GPU/cloud models this is sub
 What this does **not** show: PSTN/SIP ingress (see 3.3), commercial STT/TTS/LLM quality or
 latency, behaviour under concurrent calls, or robustness to real caller audio (accents,
 line noise) — synthetic speech is far cleaner than a phone line.
+
+### 3.3 Telephony through LiveKit SIP — **Tested against a real sandbox** (no carrier)
+
+`uv run pytest tests/lab/test_sip_lab.py --run-lab` — real `livekit/sip` v1.23.0 and LiveKit
+server; numbers provisioned with the platform's `SipProvisioner` (inbound trunk + dispatch
+rule per test, removed afterwards); outbound trunk to the scripted "office" endpoint; the
+production worker process; outbound calls placed through `POST /calls/outbound` with the
+real guardrails (allowlist `+1514555`, calling window, not dry-run). The PSTN caller and the
+office lines are `tests/lab/sipua.py`: a scripted SIP/RTP user agent (UDP, G.711 µ-law, REFER
+transferee) written for this lab because baresip cannot initialise without IPv6 sockets in
+this sandbox. Media is real RTP; what each side *hears* is re-transcribed with Vosk.
+
+Result of the full run (7/7 passed, 8 min 14 s; `docs/evidence/sip_lab.json`):
+
+| Scenario | Signalling observed | Platform outcome |
+|---|---|---|
+| Inbound call, question, hang-up | INVITE → 100/180 → 200 (0.97 s) → ACK … BYE/200 | `completed`, `inbound`, `phone`, caller/dialed numbers stored; greeting heard with WER 0.00 over G.711; answer "we open at nine am on monday"; caller-perceived response 4.5 s |
+| Blind transfer | REFER `Refer-To: tel:+15145550177` → 202; NOTIFY 100, NOTIFY 200; LiveKit BYEs its leg | `transferred`, attempt `front_desk: completed`; the caller hears the staff member ("hi this is [Sam] at the front desk") on the new leg |
+| Busy → fallback | REFER #1 → NOTIFY 486; REFER #2 (backup) → NOTIFY 200 | attempts `front_desk: busy`, `backup: completed` |
+| No answer | REFER → LiveKit gives up after the configured 10 s ("request timed out"); transferee's NOTIFY 487 arrives later | attempt `no_answer`; the caller hears the announcement, then "sorry, nobody is available … take a message"; call continues |
+| Caller hangs up during transfer | REFER, caller CANCELs the new leg and BYEs | conversation finalized (`completed`, duration set), no room left with participants |
+| Outbound, answered | INVITE from LiveKit via the outbound trunk → 180 → 200 | callee says "hello who is calling please" over the greeting; agent: "This is Alex from Maple Dental. How can I assist you today?"; `completed`, `outbound` |
+| Outbound, busy | INVITE → 486 | `busy`, `end_reason=dial_busy` |
+
+**Defects found only by these runs** (fixed, each with a regression test):
+
+| # | Severity | Defect | Fix |
+|---|---|---|---|
+| T1 | High | `transfer.transfer_on_request` (default true) was **read nowhere**; "Can I speak to a person?" depended on the model, and Qwen 2.5 3B called `check_availability` instead | Deterministic escape hatch (`runtime/escalation.py`, EN/FR, negation-aware): runs `transfer_to_human` through the executor, skips the LLM turn, speaks `failure_message` if all attempts fail |
+| T2 | High | `transfer_to_human` existed only if listed in `tools.enabled`, while `transfer.enabled` made the prompt tell the model to use it | Tool availability follows `transfer.enabled` |
+| T3 | High | Every tool, including transfers, ran under `tools.timeout_s` (8 s); the tool reported failure (agent: "nobody is available") while the SIP transfer was still ringing and could still connect | Per-tool time budget; transfers get 30 s + Σ(ringing_timeout + 5 s) |
+| T4 | Medium | Outbound callees heard the inbound greeting ("thanks for calling …"); asked who was calling, the agent said "it's a lab call" | Direction-aware greeting (`greeting.outbound_text`, default "Hi, this is <persona> calling from <business>") and an outbound prompt rule |
+| T5 | Low | Follow-through did not cover narrated transfers ("let me transfer you") | Patterns added |
+
+Still open / documented: LiveKit's REFER ringing timeout can expire before the carrier stops
+ringing the target (the lab transferee rang 12 s vs LiveKit's 10 s), so a caller might be
+connected after hearing the failure message — keep `ringing_timeout_s` above the carrier's
+no-answer time or use warm transfer (`docs/telephony-staging.md`). LiveKit SIP advertised
+`192.0.2.2` in Contact/SDP without a configured external IP; harmless on loopback, fatal
+behind NAT. **Not exercised:** warm transfer (`WarmTransferTask`), recording/egress, DTMF,
+SIP auth/IP allowlists, any real carrier. An LLM-initiated transfer (announcement played from
+inside a tool call, audit finding F5) was not exercised because the escape hatch now handles
+explicit requests; reading LiveKit's scheduler shows a `say()` created inside a tool can play
+while the tool runs (the scheduler waits only for the current speech's generation), but this
+is **Not verified**.
+
+### 3.4 Audit fixes F2–F4 — **Unit / Integration tested**
+
+* F2 booking race: after inserting, the tool lists overlapping live appointments; if any
+  exist, the smallest id survives and the others cancel their own event and tell the caller
+  the slot was just taken. Regression test with a Google-like calendar that accepts
+  overlapping inserts and a slow insert (fails without the fix, passes with it). Residual
+  risk: a calendar whose list is not read-after-write consistent.
+* F3: `IntegrityError` anywhere (handler or commit in a dependency teardown) → HTTP 409
+  `conflict`, no SQL or values echoed. Test races two identical phone-number creates
+  (`[201, 409]`, previously 500 for the loser).
+* F4: extraction runs in a spawned process killed at 60 s; DOCX zip entries/uncompressed
+  size/ratio bounded before parsing; extracted text capped. Tests: a 120 MB zip bomb that is
+  ~120 KB on disk is refused; timeout kills the child.
+
+### 3.5 Vendor contracts — Google Calendar & HubSpot **machine-checked against vendor specs**; Salesforce **reviewed against documentation**
+
+`tests/integration/test_vendor_contracts.py` drives the real adapter methods through an HTTP
+recorder and validates every request against the vendor's own artefacts: the Calendar v3
+discovery document bundled in `google-api-python-client` (method, verb, path template, query
+parameters and enums, body schema incl. nested types) and the request models of HubSpot's
+OpenAPI-generated `hubspot-api-client` (wire names, types, enums with client-side validation).
+The validators were checked to reject wrong field names, wrong types and invalid enums
+(`operator: "EQUALS"`). Salesforce has no bundled machine-readable spec; the adapter's
+external-ID upsert, 201/200/204 handling and SOSL usage were compared with Salesforce's
+documentation (upsert matching rules; External ID/Unique requirement noted in the setup docs).
+None of this replaces a run against a vendor sandbox account, which remains **Not verified**.
+
+### 3.6 Repository hygiene finding
+
+The repository-root `.gitignore` (upstream LiveKit) contains `docs/`, so **none of
+`voice-platform/docs/` had ever been committed** although the README and readiness documents
+link to it. Fixed with a scoped `!docs/` in `voice-platform/.gitignore`; the docs and the lab
+evidence files are now in the repository.
+
+### 3.7 Dependency and image scanning
+
+CI now runs `pip-audit` on the locked third-party set (`uv export --no-emit-local`; run
+locally on 2026-11-04: 157 packages, **no known vulnerabilities**), GitHub dependency review on
+pull requests (fails on high severity), and a Trivy scan of the built image (critical/high,
+fixed-only). The Trivy step has not been run here (no image build yet at time of writing).
